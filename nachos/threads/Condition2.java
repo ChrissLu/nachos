@@ -53,7 +53,9 @@ public class Condition2 {
 
 		KThread thread = waitQueue.nextThread();
 		if(thread != null) {
-			thread.ready();
+			if(!ThreadedKernel.alarm.cancel(thread)){
+				thread.ready();
+			}
 		}
 
 		Machine.interrupt().restore(intStatus);
@@ -70,7 +72,9 @@ public class Condition2 {
 
 		KThread thread = waitQueue.nextThread();
 		while(thread != null) {
-			thread.ready();
+			if(!ThreadedKernel.alarm.cancel(thread)){
+				thread.ready();
+			}
 			thread = waitQueue.nextThread();
 		}
 
@@ -87,6 +91,15 @@ public class Condition2 {
 	 */
 	public void sleepFor(long timeout) {
 		Lib.assertTrue(conditionLock.isHeldByCurrentThread());
+
+		boolean intStatus = Machine.interrupt().disable();
+
+		waitQueue.waitForAccess(KThread.currentThread());
+		conditionLock.release();
+		ThreadedKernel.alarm.waitUntil(timeout);
+
+		Machine.interrupt().restore(intStatus);
+		conditionLock.acquire();
 	}
 
 	private Lock conditionLock;
@@ -192,6 +205,21 @@ public class Condition2 {
 		// consumer.join();
 		// producer.join();
 		for (int i = 0; i < 50; i++) { KThread.currentThread().yield(); }
+	}
+
+	public static void sleepForTest1 () {
+		Lock lock = new Lock();
+		Condition2 cv = new Condition2(lock);
+
+		lock.acquire();
+		long t0 = Machine.timer().getTime();
+		System.out.println (KThread.currentThread().getName() + " sleeping");
+		// no other thread will wake us up, so we should time out
+		cv.sleepFor(2000);
+		long t1 = Machine.timer().getTime();
+		System.out.println (KThread.currentThread().getName() +
+				" woke up, slept for " + (t1 - t0) + " ticks");
+		lock.release();
 	}
 
 }
