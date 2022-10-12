@@ -29,7 +29,9 @@ public class Alarm {
 	 * should be run.
 	 */
 	public void timerInterrupt() {
+
 		KThread.currentThread().yield();
+
 	}
 
 	/**
@@ -49,6 +51,7 @@ public class Alarm {
 		long wakeTime = Machine.timer().getTime() + x;
 		while (wakeTime > Machine.timer().getTime())
 			KThread.yield();
+		timerInterrupt();
 	}
 
         /**
@@ -60,7 +63,30 @@ public class Alarm {
 	 * <p>
 	 * @param thread the thread whose timer should be cancelled.
 	 */
-        public boolean cancel(KThread thread) {
+		public boolean cancel(KThread thread) {
 		return false;
+	}
+
+	// Add Alarm testing code to the Alarm class
+
+	public static void alarmTest1() {
+		int durations[] = {1000, 10*1000, 100*1000};
+		long t0, t1;
+
+		for (int d : durations) {
+			t0 = Machine.timer().getTime();
+			ThreadedKernel.alarm.waitUntil (d);
+			t1 = Machine.timer().getTime();
+			System.out.println ("alarmTest1: waited for " + (t1 - t0) + " ticks");
+		}
+	}
+
+	// Implement more test methods here ...
+
+	// Invoke Alarm.selfTest() from ThreadedKernel.selfTest()
+	public static void selfTest() {
+		alarmTest1();
+
+		// Invoke your other test methods here ...
 	}
 }
