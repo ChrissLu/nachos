@@ -29,9 +29,7 @@ public class Alarm {
 	 * should be run.
 	 */
 	public void timerInterrupt() {
-
 		KThread.currentThread().yield();
-
 	}
 
 	/**
@@ -43,15 +41,29 @@ public class Alarm {
 	 * <blockquote> (current time) >= (WaitUntil called time)+(x) </blockquote>
 	 * 
 	 * @param x the minimum number of clock ticks to wait.
-	 * 
+	 *
 	 * @see nachos.machine.Timer#getTime()
 	 */
 	public void waitUntil(long x) {
-		// for now, cheat just to get something working (busy waiting is bad)
+		//The thread does not wait if x <= 0
+		if(x <= 0){
+			return;
+		}
 		long wakeTime = Machine.timer().getTime() + x;
-		while (wakeTime > Machine.timer().getTime())
-			KThread.yield();
-		timerInterrupt();
+		KThread.sleep();
+		KThread currentThread = KThread.currentThread();
+		if(wakeTime <= Machine.timer().getTime()){
+			currentThread.restoreState();
+			currentThread.ready();
+		}
+
+
+
+
+
+//		while (wakeTime > Machine.timer().getTime())
+//			KThread.yield();
+
 	}
 
         /**
