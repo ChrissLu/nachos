@@ -2,6 +2,11 @@ package nachos.threads;
 
 import nachos.machine.*;
 
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * Uses the hardware timer to provide preemption, and to allow threads to sleep
  * until a certain time.
@@ -20,6 +25,7 @@ public class Alarm {
 				timerInterrupt();
 			}
 		});
+		sleepingThreads = new LinkedHashMap<>();
 	}
 
 	/**
@@ -29,7 +35,24 @@ public class Alarm {
 	 * should be run.
 	 */
 	public void timerInterrupt() {
+		boolean intStatus = Machine.interrupt().disable();
+		if(sleepingThreads.isEmpty()){
+			return;
+		}
+		Iterator<Map.Entry<KThread, Long>> it = sleepingThreads.entrySet().iterator();
+		KThread currentThread = null;
+		long wakeTime = 0;
+		while (it.hasNext()) {
+			Map.Entry<KThread, Long> entry = it.next();
+			currentThread = entry.getKey();
+			wakeTime = entry.getValue();
+			if(wakeTime <= Machine.timer().getTime()){
+				currentThread.ready();
+			}
+		}
+		Machine.interrupt().restore(intStatus);
 		KThread.currentThread().yield();
+
 	}
 
 	/**
@@ -49,20 +72,14 @@ public class Alarm {
 		if(x <= 0){
 			return;
 		}
+		boolean intStatus = Machine.interrupt().disable();
+
 		long wakeTime = Machine.timer().getTime() + x;
-		KThread.sleep();
 		KThread currentThread = KThread.currentThread();
-		if(wakeTime <= Machine.timer().getTime()){
-			currentThread.restoreState();
-			currentThread.ready();
-		}
+		sleepingThreads.put(currentThread, wakeTime);
+		KThread.sleep();
 
-
-
-
-
-//		while (wakeTime > Machine.timer().getTime())
-//			KThread.yield();
+		Machine.interrupt().restore(intStatus);
 
 	}
 
@@ -75,14 +92,14 @@ public class Alarm {
 	 * <p>
 	 * @param thread the thread whose timer should be cancelled.
 	 */
-		public boolean cancel(KThread thread) {
+	public boolean cancel(KThread thread) {
 		return false;
 	}
 
 	// Add Alarm testing code to the Alarm class
 
 	public static void alarmTest1() {
-		int durations[] = {1000, 10*1000, 100*1000};
+		int durations[] = {100, 500, 1000, 10*1000, 100*1000, 1000*1000};
 		long t0, t1;
 
 		for (int d : durations) {
@@ -101,4 +118,6 @@ public class Alarm {
 
 		// Invoke your other test methods here ...
 	}
+
+	private static LinkedHashMap<KThread, Long> sleepingThreads;
 }
