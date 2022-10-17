@@ -3,20 +3,21 @@ package nachos.threads;
 import nachos.machine.*;
 
 import java.util.LinkedList;
+import java.util.HashSet;
 
 /**
  * An implementation of condition variables that disables interrupt()s for
  * synchronization.
- * 
+ *
  * <p>
  * You must implement this.
- * 
+ *
  * @see nachos.threads.Condition
  */
 public class Condition2 {
 	/**
 	 * Allocate a new condition variable.
-	 * 
+	 *
 	 * @param conditionLock the lock associated with this condition variable.
 	 * The current thread must hold this lock whenever it uses <tt>sleep()</tt>,
 	 * <tt>wake()</tt>, or <tt>wakeAll()</tt>.
@@ -34,12 +35,12 @@ public class Condition2 {
 
 		boolean intStatus = Machine.interrupt().disable();
 
-		waitQueue.waitForAccess(KThread.currentThread());
 		conditionLock.release();
+		waitQueue.waitForAccess(KThread.currentThread());
 		KThread.sleep();
 
-		Machine.interrupt().restore(intStatus);
 		conditionLock.acquire();
+		Machine.interrupt().restore(intStatus);
 	}
 
 	/**
@@ -52,9 +53,19 @@ public class Condition2 {
 		boolean intStatus = Machine.interrupt().disable();
 
 		KThread thread = waitQueue.nextThread();
-		if(thread != null) {
-			if(!ThreadedKernel.alarm.cancel(thread)){
+		while(thread != null){
+			if(ThreadedKernel.alarm.cancel(thread)){
+				// wake before timeout
+				SleepForThreads.remove(thread);
+				break;
+			} else if (!SleepForThreads.contains(thread)){
+				// normal sleep
 				thread.ready();
+				break;
+			} else{
+				// wake by timer
+				SleepForThreads.remove(thread);
+				thread = waitQueue.nextThread();
 			}
 		}
 
@@ -71,9 +82,16 @@ public class Condition2 {
 		boolean intStatus = Machine.interrupt().disable();
 
 		KThread thread = waitQueue.nextThread();
-		while(thread != null) {
-			if(!ThreadedKernel.alarm.cancel(thread)){
+		while(thread != null){
+			if(ThreadedKernel.alarm.cancel(thread)){
+				// wake before timeout
+				SleepForThreads.remove(thread);
+			} else if (!SleepForThreads.contains(thread)){
+				// normal sleep
 				thread.ready();
+			} else{
+				// wake by timer
+				SleepForThreads.remove(thread);
 			}
 			thread = waitQueue.nextThread();
 		}
@@ -81,7 +99,7 @@ public class Condition2 {
 		Machine.interrupt().restore(intStatus);
 	}
 
-        /**
+	/**
 	 * Atomically release the associated lock and go to sleep on
 	 * this condition variable until either (1) another thread
 	 * wakes it using <tt>wake()</tt>, or (2) the specified
@@ -91,21 +109,23 @@ public class Condition2 {
 	 */
 	public void sleepFor(long timeout) {
 		Lib.assertTrue(conditionLock.isHeldByCurrentThread());
-
 		boolean intStatus = Machine.interrupt().disable();
+		SleepForThreads.add(KThread.currentThread());
 
-		waitQueue.waitForAccess(KThread.currentThread());
 		conditionLock.release();
+		waitQueue.waitForAccess(KThread.currentThread());
 		ThreadedKernel.alarm.waitUntil(timeout);
 
-		Machine.interrupt().restore(intStatus);
 		conditionLock.acquire();
+		Machine.interrupt().restore(intStatus);
 	}
 
 	private Lock conditionLock;
 
 	private ThreadQueue waitQueue = ThreadedKernel.scheduler
 			.newThreadQueue(false);
+
+	private HashSet<KThread> SleepForThreads = new HashSet<KThread>();
 
 	private static class InterlockTest {
 		private static Lock lock;
@@ -222,4 +242,54 @@ public class Condition2 {
 		lock.release();
 	}
 
+	public static void mySleepForTest(){
+		final Lock lock = new Lock();
+		final Condition2 cv = new Condition2(lock);
+
+		KThread t1 = new KThread( new Runnable () {
+			public void run () {
+				lock.acquire();
+				long t0 = Machine.timer().getTime();
+				System.out.println("T1 sleep time: " + t0);
+				cv.sleepFor(1000);
+				long t1 = Machine.timer().getTime();
+				System.out.println("T1 wake time: " + t1);
+				cv.wake();
+
+				t0 = Machine.timer().getTime();
+				System.out.println("T1 sleep time: " + t0);
+				cv.sleepFor(5000);
+				t1 = Machine.timer().getTime();
+				System.out.println("T1 wake time: " + t1);
+
+				lock.release();
+			}
+		});
+
+		KThread t2 = new KThread( new Runnable () {
+			public void run () {
+				lock.acquire();
+				long t0 = Machine.timer().getTime();
+				System.out.println("T2 sleep time: " + t0);
+				cv.sleepFor(2000);
+				long t1 = Machine.timer().getTime();
+				System.out.println("T2 wake time: " + t1);
+
+				t0 = Machine.timer().getTime();
+				System.out.println("T2 sleep time: " + t0);
+				cv.sleepFor(2000);
+				t1 = Machine.timer().getTime();
+				System.out.println("T2 wake time: " + t1);
+				
+				cv.wake();
+				lock.release();
+			}
+		});
+
+		t1.setName("T1");
+		t2.setName("T2");
+		t1.fork();
+		t2.fork();
+		for (int i = 0; i < 500; i++) { KThread.currentThread().yield(); }
+	}
 }
