@@ -99,7 +99,7 @@ public class Alarm {
 	// Add Alarm testing code to the Alarm class
 
 	public static void alarmTest1() {
-		int durations[] = {100, 500, 1000, 10*1000, 100*1000, 1000*1000};
+		int durations[] = {-1000, 0, 100, 500, 1000, 10*1000, 100*1000, 1000*1000};
 		long t0, t1;
 
 		for (int d : durations) {
