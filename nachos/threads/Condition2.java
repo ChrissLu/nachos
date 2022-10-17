@@ -3,8 +3,9 @@ package nachos.threads;
 import nachos.machine.*;
 
 import java.util.LinkedList;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.Iterator;
+import java.util.Map;
 
 /**
  * An implementation of condition variables that disables interrupt()s for
@@ -41,7 +42,7 @@ public class Condition2 {
 		boolean intStatus = Machine.interrupt().disable();
 
 		conditionLock.release();
-		waitQueue.add(KThread.currentThread());
+		waitQueue.put(KThread.currentThread(), (long) -1);
 		KThread.sleep();
 
 		waitQueue.remove(KThread.currentThread());
@@ -58,11 +59,25 @@ public class Condition2 {
 
 		boolean intStatus = Machine.interrupt().disable();
 
-		Iterator<KThread> iter = waitQueue.iterator();
-		if(iter.hasNext()){
-			KThread thread = iter.next();
-			if(!ThreadedKernel.alarm.cancel(thread)){
+		Iterator<Map.Entry<KThread, Long>> iter = waitQueue.entrySet().iterator();
+		Map.Entry<KThread, Long> entry = null;
+		while(iter.hasNext()){
+			entry = iter.next();
+			KThread thread = entry.getKey();
+			long time = entry.getValue();
+
+			if(time == -1){
 				thread.ready();
+				iter.remove();
+				break;
+			} else if(time < Machine.timer().getTime()){
+				iter.remove();
+			} else{
+				if(!ThreadedKernel.alarm.cancel(thread)){
+					thread.ready();
+				}
+				iter.remove();
+				break;
 			}
 		}
 		Machine.interrupt().restore(intStatus);
@@ -77,11 +92,21 @@ public class Condition2 {
 
 		boolean intStatus = Machine.interrupt().disable();
 
-		Iterator<KThread> iter = waitQueue.iterator();
+		Iterator<Map.Entry<KThread, Long>> iter = waitQueue.entrySet().iterator();
 		while(iter.hasNext()){
-			KThread thread = iter.next();
-			if(!ThreadedKernel.alarm.cancel(thread)){
+			KThread thread = iter.next().getKey();
+			long time = iter.next().getValue();
+
+			if(time == -1){
 				thread.ready();
+				iter.remove();
+			} else if(time < Machine.timer().getTime()){
+				iter.remove();
+			} else{
+				if(!ThreadedKernel.alarm.cancel(thread)){
+					thread.ready();
+				}
+				iter.remove();
 			}
 		}
 
@@ -102,7 +127,7 @@ public class Condition2 {
 		boolean intStatus = Machine.interrupt().disable();
 
 		conditionLock.release();
-		waitQueue.add(KThread.currentThread());
+		waitQueue.put(KThread.currentThread(), Machine.timer().getTime() + timeout);
 		ThreadedKernel.alarm.waitUntil(timeout);
 
 		waitQueue.remove(KThread.currentThread());
@@ -112,7 +137,7 @@ public class Condition2 {
 
 	private Lock conditionLock;
 
-	private LinkedHashSet<KThread> waitQueue = new LinkedHashSet<KThread>();
+	private LinkedHashMap<KThread, Long> waitQueue = new LinkedHashMap<KThread, Long>();
 
 	private String name;
 
@@ -153,8 +178,7 @@ public class Condition2 {
 			// call to join and instead uncomment the loop with
 			// yields; the loop has the same effect, but is a kludgy
 			// way to do it.
-			// ping.join();
-			for (int i = 0; i < 50; i++) { KThread.currentThread().yield(); }
+			ping.join();
 		}
 	}
 
@@ -167,36 +191,42 @@ public class Condition2 {
 	public static void cvTest5() {
 		final Lock lock = new Lock();
 		// final Condition empty = new Condition(lock);
-		final Condition2 empty = new Condition2(lock);
+		final Condition2 empty = new Condition2(lock, "empty: ");
+		final Condition2 full = new Condition2(lock, "full: ");
 		final LinkedList<Integer> list = new LinkedList<>();
 
 		KThread consumer = new KThread( new Runnable () {
 			public void run() {
-				lock.acquire();
-				while(list.isEmpty()){
-					empty.sleep();
-				}
-				Lib.assertTrue(list.size() == 5, "List should have 5 values.");
-				while(!list.isEmpty()) {
+				while(true){
+					lock.acquire();
+					while(list.isEmpty()){
+						empty.sleep();
+					}
 					// context swith for the fun of it
 					KThread.currentThread().yield();
 					System.out.println("Removed " + list.removeFirst());
+					full.wake();
+					lock.release();
 				}
-				lock.release();
 			}
 		});
 
 		KThread producer = new KThread( new Runnable () {
 			public void run() {
-				lock.acquire();
-				for (int i = 0; i < 5; i++) {
+				int i = 0;
+				while(true){
+					lock.acquire();
+					while(list.size() > 5){
+						full.sleep();
+					}
 					list.add(i);
 					System.out.println("Added " + i);
+					i++;
 					// context swith for the fun of it
 					KThread.currentThread().yield();
+					empty.wake();
+					lock.release();
 				}
-				empty.wake();
-				lock.release();
 			}
 		});
 
@@ -211,9 +241,8 @@ public class Condition2 {
 		// implemented join yet, then comment out the calls to join
 		// and instead uncomment the loop with yield; the loop has the
 		// same effect, but is a kludgy way to do it.
-		// consumer.join();
-		// producer.join();
-		for (int i = 0; i < 50; i++) { KThread.currentThread().yield(); }
+		consumer.join();
+		producer.join();
 	}
 
 	public static void sleepForTest1 () {
@@ -279,7 +308,8 @@ public class Condition2 {
 		t2.setName("T2");
 		t1.fork();
 		t2.fork();
-		for (int i = 0; i < 500; i++) { KThread.currentThread().yield(); }
+		t1.join();
+		t2.join();
 	}
 
 	public static void mySleepForTest2(){
@@ -339,6 +369,8 @@ public class Condition2 {
 		pong.setName("Pong");
 		ping.fork();
 		pong.fork();
-		for (int i = 0; i < 50000; i++) { KThread.currentThread().yield(); }
+		ping.join();
+		pong.join();
+		//for (int i = 0; i < 5000; i++) { KThread.currentThread().yield(); }
 	}
 }
