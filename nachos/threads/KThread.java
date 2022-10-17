@@ -79,6 +79,7 @@ public class KThread {
 	 */
 	public KThread(Runnable target) {
 		this();
+		this.joinCount = 0;
 		this.target = target;
 	}
 
@@ -201,9 +202,14 @@ public class KThread {
 		Machine.autoGrader().finishingCurrentThread();
 
 		Lib.assertTrue(toBeDestroyed == null);
+
 		toBeDestroyed = currentThread;
 
 		currentThread.status = statusFinished;
+		KThread joinedThread = currentThread.joinedQueue.nextThread();
+		if(joinedThread != null){
+			joinedThread.ready();
+		}
 
 		sleep();
 	}
@@ -289,25 +295,21 @@ public class KThread {
 		Lib.assertTrue(this != currentThread);
 
 		Lib.assertTrue(joinCount == 0);
-
+//		KThread.yield();
 		joinCount++;
 		System.out.println("start:" + status);
+
 		if(status == statusFinished){
 			return;
 		}
 		boolean intStatus = Machine.interrupt().disable();
-
+		if(status == statusNew){
+			ready();
+		}
 		joinedQueue.waitForAccess(currentThread);
 		KThread.sleep();
 
-		System.out.println("end:" + status);
-
 		Machine.interrupt().restore(intStatus);
-
-
-
-
-
 	}
 
 	/**
@@ -458,15 +460,12 @@ public class KThread {
 		Lib.assertTrue((child1.status == statusFinished), " Expected child1 to be finished.");
 	}
 	private static void joinTest2(){
-		KThread child1 = new KThread( new Runnable () {
-			public void run() {
-				System.out.println("I (heart) Nachos!");
-			}
-		});
-		child1.setName("child1").fork();
-		child1.join();
-		System.out.println("After joining, child1 should be finished.");
-		System.out.println("is it? " + (child1.status == statusFinished));
+		System.out.println("JOIN TEST #1: Start");
+		KThread ping1 = new KThread(new PingTest(1));
+		ping1.fork();
+		ping1.join();
+		new PingTest(0).run();
+		System.out.println("JOIN TEST #1: Finished");
 	}
 	private static void joinTest3(){
 		KThread child1 = new KThread( new Runnable () {
@@ -493,6 +492,7 @@ public class KThread {
 		KThread child2 = new KThread( new Runnable () {
 			public void run() {
 				System.out.println("I am running child2!");
+				child1.fork();
 				child1.join();
 				System.out.println("After joining, child1 should be finished.");
 				System.out.println("is it? " + (child1.status == statusFinished));
@@ -501,6 +501,34 @@ public class KThread {
 		child1.setName("child1");
 		System.out.println("busy...");
 		child2.setName("child2").fork();
+	}
+	private static void joinTest5(){
+		KThread child1 = new KThread( new Runnable () {
+			public void run() {
+				System.out.println("I am running child1!");
+			}
+		});
+		KThread child2 = new KThread( new Runnable () {
+			public void run() {
+				System.out.println("I am running child2!");
+			}
+		});
+		KThread child3 = new KThread( new Runnable () {
+			public void run() {
+				System.out.println("I am running child3!");
+			}
+		});
+		child1.setName("child1").fork();
+		child2.setName("child2").fork();
+		child3.setName("child3").fork();
+
+		KThread.yield();
+
+		child3.join();
+		child2.join();
+		child1.join();
+
+		System.out.println("All joins are finished!");
 	}
 	/**
 	 * Tests whether this module is working.
@@ -518,6 +546,8 @@ public class KThread {
 		joinTest3();
 		System.out.println("joinTest4: ");
 		joinTest4();
+		System.out.println("joinTest5: ");
+		joinTest5();
 	}
 
 	private static final char dbgThread = 't';
@@ -569,7 +599,7 @@ public class KThread {
 
 	private static KThread idleThread = null;
 
-	private int joinCount = 0;
+	public int joinCount;
 
 	private static ThreadQueue joinedQueue = null;
 }

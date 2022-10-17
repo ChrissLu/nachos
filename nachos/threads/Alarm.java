@@ -39,6 +39,8 @@ public class Alarm {
 		if(sleepingThreads.isEmpty()){
 			return;
 		}
+
+
 		Iterator<Map.Entry<KThread, Long>> it = sleepingThreads.entrySet().iterator();
 		KThread currentThread = null;
 		long wakeTime = 0;
