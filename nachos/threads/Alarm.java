@@ -39,6 +39,8 @@ public class Alarm {
 		if(sleepingThreads.isEmpty()){
 			return;
 		}
+
+
 		Iterator<Map.Entry<KThread, Long>> it = sleepingThreads.entrySet().iterator();
 		KThread currentThread = null;
 		long wakeTime = 0;
@@ -99,7 +101,7 @@ public class Alarm {
 	// Add Alarm testing code to the Alarm class
 
 	public static void alarmTest1() {
-		int durations[] = {100, 500, 1000, 10*1000, 100*1000, 1000*1000};
+		int durations[] = {-1000, 0, 100, 500, 1000, 10*1000, 100*1000, 1000*1000};
 		long t0, t1;
 
 		for (int d : durations) {
