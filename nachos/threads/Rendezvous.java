@@ -12,19 +12,25 @@ public class Rendezvous {
      * Allocate a new Rendezvous.
      */
 
-    private List<String> names;
-    private List<Integer> numbers;
+    // private List<String> names;
+    // private List<Integer> numbers;
     private Map<Integer,List> tags_names;
     private Map<Integer,List> tags_numbers;
-    private Semaphore mutex; 
+    private Map<Integer,Integer> tags_temp; //store temp value with tag
+    //private Semaphore mutex; 
+    private Condition next_come_in;
+    private Lock lock;
     
     public Rendezvous () {
-        names = new ArrayList<String>();        
-        numbers = new ArrayList<Integer>();
+        // names = new ArrayList<String>();        
+        // numbers = new ArrayList<Integer>();
         
         tags_names = new HashMap<>();
         tags_numbers = new HashMap<>();
-        mutex = new Semaphore(1); //control numbers
+        tags_temp = new HashMap<>();
+        //mutex = new Semaphore(1); //control numbers
+        lock = new Lock();
+        next_come_in = new Condition(lock);
     }
 
     /*
@@ -45,7 +51,16 @@ public class Rendezvous {
      */
     public int exchange (int tag, int value) {
         
-        mutex.P();
+        int res;
+        int t; //for exchange
+        lock.acquire();
+            // if(tags_temp.get(tag) == null) 
+            //     tags_temp.put(tag,0);
+            // t = value;
+            // value = tags_temp.get(tag);
+            // tags_temp.put(tag, t);
+
+
             if(tags_names.get(tag) == null){
                 tags_names.put(tag,new ArrayList<String>());
                 tags_names.get(tag).add(KThread.currentThread().getName());
@@ -60,18 +75,20 @@ public class Rendezvous {
                 tags_numbers.get(tag).add(value);
             }
         
-        mutex.V();
+            while(tags_numbers.get(tag).size() == 1){
+                next_come_in.sleep();
+            }
 
-        KThread.currentThread().yield();
-        mutex.P();
-        int res;
-        // System.out.println(tags_names.get(tag).get(0));
-        // System.out.println(tags_numbers.get(tag).get(0));
-        if(KThread.currentThread().getName() == tags_names.get(tag).get(0)) 
-            res = (int)tags_numbers.get(tag).get(1);
-        else res = (int)tags_numbers.get(tag).get(0);
+            if(KThread.currentThread().getName() == tags_names.get(tag).get(0)) 
+                res = (int)tags_numbers.get(tag).get(1);
+            else res = (int)tags_numbers.get(tag).get(0);
 
-        mutex.V();
+
+
+            next_come_in.wake();
+
+
+        lock.release();
         
         return res;
     }
