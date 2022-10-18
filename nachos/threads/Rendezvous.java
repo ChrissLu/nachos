@@ -16,15 +16,15 @@ public class Rendezvous {
     private Map<Integer,List> tags_numbers; // global variable for value storage
     
     private Lock lock;
-    private Condition next_come_in; // if B has not come in, let A wait 
+    private Map<Integer,Condition> next_come_ins; // if B has not come in, let A wait 
     
     
     public Rendezvous () {
 
         tags_numbers = new HashMap<>();
-
+        next_come_ins = new HashMap<>();
         lock = new Lock();
-        next_come_in = new Condition(lock);
+        //next_come_in = new Condition(lock);
     }
 
     /*
@@ -48,37 +48,37 @@ public class Rendezvous {
         int res;
         lock.acquire();
 
-            // put the value in to a global variable
+            // put the value in to a global variable, create a new condition variable for the tag
             if(tags_numbers.get(tag) == null){
                 tags_numbers.put(tag,new ArrayList<Integer>());
-                tags_numbers.get(tag).add(value);
-            }else{
-                tags_numbers.get(tag).add(value);
+                next_come_ins.put(tag,new Condition(lock));
             }
+                tags_numbers.get(tag).add(value);
 
             // use condition variable to let A wait
             while(tags_numbers.get(tag).size() == 1){
-                next_come_in.sleep();
+                next_come_ins.get(tag).sleep();
             }
             
             //exchage value in A and B
-            Lib.assertTrue(tags_numbers.get(tag).size()==2);
+            Lib.assertTrue(tags_numbers.get(tag).size()==2, "more than two threads in the tag"+ tag);
             res = (int)tags_numbers.get(tag).get(0);
             // reverse the arraylist to make sure the result is the exchaged one
             Collections.reverse(tags_numbers.get(tag));
 
             // wake(signal) A 
-            next_come_in.wake();
+            next_come_ins.get(tag).wake();
 
 
         lock.release();
         
         return res;
     }
-
+/********************test***********************************/
     
-
+    // test only one tag
     public static void rendezTest1() {
+        System.out.println("running rendezTest1");
         final Rendezvous r = new Rendezvous();
 
         KThread t1 = new KThread( new Runnable () {
@@ -111,7 +111,9 @@ public class Rendezvous {
         t1.join(); t2.join();
         }
 
-        public static void rendezTest2() {
+        //basic condition for  two tags
+    public static void rendezTest2() {
+        System.out.println("running rendezTest2");
         final Rendezvous r = new Rendezvous();
 
         KThread t1 = new KThread( new Runnable () {
@@ -164,12 +166,74 @@ public class Rendezvous {
             });
         t4.setName("t4");
 
-        t1.fork(); t3.fork(); t4.fork();t2.fork();
+        t1.fork();t3.fork(); t4.fork();t2.fork();
         // assumes join is implemented correctly
-        t3.join(); t1.join();t4.join();t2.join();
+        t3.join();t1.join();t4.join();t2.join();
         }
 
-        public static void rendezTest3() {
+    // test no pairing thread
+    public static void rendezTest2_1(){
+        System.out.println("running rendezTest2_1");
+        final Rendezvous r = new Rendezvous();
+
+        KThread t1 = new KThread( new Runnable () {
+            public void run() {
+                int tag = 0;
+                int send = -1;
+
+                System.out.println ("Thread " + KThread.currentThread().getName() + " exchanging " + send);
+                int recv = r.exchange (tag, send);
+                Lib.assertTrue (recv == 1, "Was expecting " + 1 + " but received " + recv);
+                System.out.println ("Thread " + KThread.currentThread().getName() + " received " + recv);
+            }
+            });
+        t1.setName("t1");
+        KThread t2 = new KThread( new Runnable () {
+            public void run() {
+                int tag = 0;
+                int send = 1;
+
+                System.out.println ("Thread " + KThread.currentThread().getName() + " exchanging " + send);
+                int recv = r.exchange (tag, send);
+                Lib.assertTrue (recv == -1, "Was expecting " + -1 + " but received " + recv);
+                System.out.println ("Thread " + KThread.currentThread().getName() + " received " + recv);
+            }
+            });
+        t2.setName("t2");
+
+        KThread t3 = new KThread( new Runnable () {
+            public void run() {
+                int tag = 1;
+                int send = 99;
+
+                System.out.println ("Thread " + KThread.currentThread().getName() + " exchanging " + send);
+                int recv = r.exchange (tag, send);
+                Lib.assertTrue (recv == -99, "Was expecting " + -99 + " but received " + recv);
+                System.out.println ("Thread " + KThread.currentThread().getName() + " received " + recv);
+            }
+            });
+        t3.setName("t3");
+        KThread t4 = new KThread( new Runnable () {
+            public void run() {
+                int tag = 1;
+                int send = -99;
+
+                System.out.println ("Thread " + KThread.currentThread().getName() + " exchanging " + send);
+                int recv = r.exchange (tag, send);
+                Lib.assertTrue (recv == 99, "Was expecting " + 99 + " but received " + recv);
+                System.out.println ("Thread " + KThread.currentThread().getName() + " received " + recv);
+            }
+            });
+        t4.setName("t4");
+
+        t1.fork();t3.fork(); t4.fork();//t2.fork();
+        t3.join();t1.join();t4.join();//t2.join();
+
+    }
+
+        // test three tags
+    public static void rendezTest3() {
+        System.out.println("running rendezTest3");
         final Rendezvous r = new Rendezvous();
 
         KThread t1 = new KThread( new Runnable () {
@@ -233,7 +297,7 @@ public class Rendezvous {
                 System.out.println ("Thread " + KThread.currentThread().getName() + " received " + recv);
             }
             });
-        t5.setName("t1");
+        t5.setName("t5");
 
         KThread t6 = new KThread( new Runnable () {
             public void run() {
@@ -246,11 +310,11 @@ public class Rendezvous {
                 System.out.println ("Thread " + KThread.currentThread().getName() + " received " + recv);
             }
             });
-        t6.setName("t2");
+        t6.setName("t6");
 
         t1.fork(); t2.fork(); t3.fork();t4.fork(); t5.fork(); t6.fork();
         // assumes join is implemented correctly
-        t1.join(); t2.join();t3.join();t4.join();t5.join();t6.join();
+        t4.join();t1.join(); t2.join();t5.join();t3.join();t6.join();
         }
     
 
@@ -260,6 +324,7 @@ public class Rendezvous {
         // place calls to your Rendezvous tests that you implement here
         rendezTest1();
         rendezTest2();
-        //rendezTest3();
+        rendezTest2_1();
+        rendezTest3();
     }
 }

@@ -207,9 +207,13 @@ public class KThread {
 
 		currentThread.status = statusFinished;
 		KThread joinedThread = currentThread.joinedQueue.nextThread();
+		// if(joinedThread != null){
+		// 	joinedThread.ready();
+		// }
 		if(joinedThread != null){
-			joinedThread.ready();
-		}
+            if(joinedThread.status == statusBlocked)
+                joinedThread.ready();
+        }
 
 		sleep();
 	}
@@ -601,5 +605,6 @@ public class KThread {
 
 	public int joinCount;
 
-	private static ThreadQueue joinedQueue = null;
+	//private static ThreadQueue joinedQueue = null;
+	private ThreadQueue joinedQueue = ThreadedKernel.scheduler.newThreadQueue(false);
 }
