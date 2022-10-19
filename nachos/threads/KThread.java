@@ -61,8 +61,6 @@ public class KThread {
 			readyQueue = ThreadedKernel.scheduler.newThreadQueue(false);
 			readyQueue.acquire(this);
 
-			joinedQueue = ThreadedKernel.scheduler.newThreadQueue(false);
-
 			currentThread = this;
 			tcb = TCB.currentTCB();
 			name = "main";
@@ -207,13 +205,12 @@ public class KThread {
 
 		currentThread.status = statusFinished;
 		KThread joinedThread = currentThread.joinedQueue.nextThread();
-		// if(joinedThread != null){
-		// 	joinedThread.ready();
-		// }
+
 		if(joinedThread != null){
-            if(joinedThread.status == statusBlocked)
+			if(joinedThread.status == statusBlocked)
                 joinedThread.ready();
-        }
+        	}
+		}
 
 		sleep();
 	}
@@ -299,7 +296,6 @@ public class KThread {
 		Lib.assertTrue(this != currentThread);
 
 		Lib.assertTrue(joinCount == 0);
-//		KThread.yield();
 		joinCount++;
 		System.out.println("start:" + status);
 
@@ -307,9 +303,6 @@ public class KThread {
 			return;
 		}
 		boolean intStatus = Machine.interrupt().disable();
-		if(status == statusNew){
-			ready();
-		}
 		joinedQueue.waitForAccess(currentThread);
 		KThread.sleep();
 
@@ -605,6 +598,5 @@ public class KThread {
 
 	public int joinCount;
 
-	//private static ThreadQueue joinedQueue = null;
 	private ThreadQueue joinedQueue = ThreadedKernel.scheduler.newThreadQueue(false);
 }
