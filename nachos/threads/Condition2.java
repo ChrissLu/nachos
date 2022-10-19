@@ -25,10 +25,6 @@ public class Condition2 {
 	 * <tt>wake()</tt>, or <tt>wakeAll()</tt>.
 	 */
 	public Condition2(Lock conditionLock) {	this.conditionLock = conditionLock;	}
-	public Condition2(Lock conditionLock, String name) {
-		this.conditionLock = conditionLock;	
-		this.name = name;
-	}
 
 	/**
 	 * Atomically release the associated lock and go to sleep on this condition
@@ -93,9 +89,11 @@ public class Condition2 {
 		boolean intStatus = Machine.interrupt().disable();
 
 		Iterator<Map.Entry<KThread, Long>> iter = waitQueue.entrySet().iterator();
+		Map.Entry<KThread, Long> entry = null;
 		while(iter.hasNext()){
-			KThread thread = iter.next().getKey();
-			long time = iter.next().getValue();
+			entry = iter.next();
+			KThread thread = entry.getKey();
+			long time = entry.getValue();
 
 			if(time == -1){
 				thread.ready();
@@ -138,8 +136,6 @@ public class Condition2 {
 	private Lock conditionLock;
 
 	private LinkedHashMap<KThread, Long> waitQueue = new LinkedHashMap<KThread, Long>();
-
-	private String name;
 
 	private static class InterlockTest {
 		private static Lock lock;
@@ -186,6 +182,10 @@ public class Condition2 {
 
 	public static void selfTest() {
 		new InterlockTest();
+		sleepForTest1();
+		mySleepForTest();
+		mySleepForTest2();
+		//cvTest5();
 	}
 
 	public static void cvTest5() {
@@ -268,17 +268,15 @@ public class Condition2 {
 			public void run () {
 				lock.acquire();
 				long t0 = Machine.timer().getTime();
-				System.out.println("T1 sleep time: " + t0);
 				cv.sleepFor(1000);
 				long t1 = Machine.timer().getTime();
-				System.out.println("T1 wake time: " + t1);
+				Lib.assertTrue(t1 > t0 + 1000);
 				cv.wake();
 
 				t0 = Machine.timer().getTime();
-				System.out.println("T1 sleep time: " + t0);
 				cv.sleepFor(5000);
 				t1 = Machine.timer().getTime();
-				System.out.println("T1 wake time: " + t1);
+				Lib.assertTrue(t1 < t0 + 5000);
 
 				lock.release();
 			}
@@ -288,16 +286,14 @@ public class Condition2 {
 			public void run () {
 				lock.acquire();
 				long t0 = Machine.timer().getTime();
-				System.out.println("T2 sleep time: " + t0);
 				cv.sleepFor(2000);
 				long t1 = Machine.timer().getTime();
-				System.out.println("T2 wake time: " + t1);
+				Lib.assertTrue(t1 < t0 + 2000);
 
 				t0 = Machine.timer().getTime();
-				System.out.println("T2 sleep time: " + t0);
 				cv.sleepFor(2000);
 				t1 = Machine.timer().getTime();
-				System.out.println("T2 wake time: " + t1);
+				Lib.assertTrue(t1 > t0 + 2000);
 				
 				cv.wake();
 				lock.release();
@@ -371,6 +367,5 @@ public class Condition2 {
 		pong.fork();
 		ping.join();
 		pong.join();
-		//for (int i = 0; i < 5000; i++) { KThread.currentThread().yield(); }
 	}
 }
