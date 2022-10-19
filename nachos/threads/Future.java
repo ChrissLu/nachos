@@ -16,6 +16,20 @@ public class Future {
      * of invoking <i>function</i>.
      */
     public Future (IntSupplier function) {
+        mutex = new Lock();
+        finished = new Condition(mutex);
+
+        isFinished = false;
+        KThread thread = new KThread(new Runnable() {
+            public void run() {
+                retValue = function.getAsInt();
+                mutex.acquire();
+                isFinished = true;
+                finished.wakeAll();
+                mutex.release();
+            }
+        });
+        thread.fork();
     }
 
     /**
@@ -28,6 +42,45 @@ public class Future {
      * threads), and it should always return the same value.
      */
     public int get () {
-	return -1;
+        mutex.acquire();
+        while(isFinished == false)
+            finished.sleep();
+        mutex.release();
+        return retValue;
+    }
+
+    Lock mutex;
+
+    Condition finished;
+
+    private boolean isFinished;
+
+    private int retValue;
+
+    private static int generateInt(int x){
+        for(int i=0;i<50;++i) {KThread.currentThread().yield();}
+        return x;
+    }
+
+    public static void selfTest() {
+        int target = 1000;
+        IntSupplier sup = () -> generateInt(target);
+        Future async = new Future(sup);
+
+        KThread t = new KThread(new Runnable() {
+            public void run() {
+                int result = async.get();
+                Lib.assertTrue(result == target);
+                result = async.get();
+                Lib.assertTrue(result == target);
+            }
+        });
+
+        t.fork();
+        int result = async.get();
+        Lib.assertTrue(result == target);
+        result = async.get();
+        Lib.assertTrue(result == target);
+        t.join();
     }
 }
