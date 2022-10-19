@@ -14,7 +14,7 @@ public class Rendezvous {
 
 
     private Map<Integer,LinkedList> tags_numbers; // global variable for value storage
-    private Map<Integer,Integer> a_numbers; //a flag to indicate A
+    private Map<Integer,String> a_tagname; //a flag to indicate A
     
     private Lock lock;
     private Map<Integer,Condition> next_come_ins; //  let A wait for B coming in 
@@ -26,7 +26,7 @@ public class Rendezvous {
         tags_numbers = new HashMap<>();
         next_come_ins = new HashMap<>();
         pair_finished = new HashMap<>();
-        a_numbers = new HashMap<>();
+        a_tagname = new HashMap<>();
         lock = new Lock();
         //next_come_in = new Condition(lock);
     }
@@ -53,8 +53,9 @@ public class Rendezvous {
         lock.acquire();
 
             // waiting for previous pair of threads  
-            if(pair_finished.get(tag) == null) pair_finished.put(tag,new Condition(lock));
-
+            if(pair_finished.get(tag) == null){
+                pair_finished.put(tag,new Condition(lock));
+            }
             while(tags_numbers.get(tag) != null && tags_numbers.get(tag).size()==2){
                 pair_finished.get(tag).sleep();
             }
@@ -63,7 +64,7 @@ public class Rendezvous {
             if(tags_numbers.get(tag) == null){
                 tags_numbers.put(tag,new LinkedList<Integer>());
                 next_come_ins.put(tag,new Condition(lock));
-                a_numbers.put(tag,value);
+                a_tagname.put(tag,KThread.currentThread().getName());
             }
                 tags_numbers.get(tag).add(value);
 
@@ -82,7 +83,7 @@ public class Rendezvous {
             // wake(signal) A 
             next_come_ins.get(tag).wake();
             
-            if(value == a_numbers.get(tag)){ //indicate this is A
+            if(KThread.currentThread().getName() == a_tagname.get(tag)){ //indicate this is A
                 tags_numbers.get(tag).clear(); //clear the tag for the next two threads
                 pair_finished.get(tag).wakeAll(); //the first pair has finished, wake the next pair
             }
@@ -285,7 +286,7 @@ public class Rendezvous {
 
                 System.out.println ("Thread " + KThread.currentThread().getName() + " exchanging " + send);
                 int recv = r.exchange (tag, send);
-                Lib.assertTrue (recv == -99, "Was expecting " + -99 + " but received " + recv);
+                Lib.assertTrue (recv == 99, "Was expecting " + 99 + " but received " + recv);
                 System.out.println ("Thread " + KThread.currentThread().getName() + " received " + recv);
             }
             });
@@ -293,7 +294,7 @@ public class Rendezvous {
         KThread t4 = new KThread( new Runnable () {
             public void run() {
                 int tag = 0;
-                int send = -99;
+                int send = 99;
 
                 System.out.println ("Thread " + KThread.currentThread().getName() + " exchanging " + send);
                 int recv = r.exchange (tag, send);
@@ -365,7 +366,7 @@ public class Rendezvous {
 
         KThread t5 = new KThread( new Runnable () {
             public void run() {
-                int tag = 12;
+                int tag = 0;
                 int send = -8964;
 
                 System.out.println ("Thread " + KThread.currentThread().getName() + " exchanging " + send);
@@ -378,7 +379,7 @@ public class Rendezvous {
 
         KThread t6 = new KThread( new Runnable () {
             public void run() {
-                int tag = 12;
+                int tag = 0;
                 int send = 8964;
 
                 System.out.println ("Thread " + KThread.currentThread().getName() + " exchanging " + send);
