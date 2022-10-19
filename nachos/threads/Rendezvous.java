@@ -14,7 +14,7 @@ public class Rendezvous {
 
 
     private Map<Integer,LinkedList> tags_numbers; // global variable for value storage
-    private Map<Integer,String> a_tagname; //a flag to indicate A
+    private Map<Integer,String> a_name; //a flag to indicate A
     
     private Lock lock;
     private Map<Integer,Condition> next_come_ins; //  let A wait for B coming in 
@@ -26,9 +26,8 @@ public class Rendezvous {
         tags_numbers = new HashMap<>();
         next_come_ins = new HashMap<>();
         pair_finished = new HashMap<>();
-        a_tagname = new HashMap<>();
+        a_name = new HashMap<>();
         lock = new Lock();
-        //next_come_in = new Condition(lock);
     }
 
     /*
@@ -64,7 +63,7 @@ public class Rendezvous {
             if(tags_numbers.get(tag) == null){
                 tags_numbers.put(tag,new LinkedList<Integer>());
                 next_come_ins.put(tag,new Condition(lock));
-                a_tagname.put(tag,KThread.currentThread().getName());
+                a_name.put(tag,KThread.currentThread().getName());
             }
                 tags_numbers.get(tag).add(value);
 
@@ -83,7 +82,7 @@ public class Rendezvous {
             // wake(signal) A 
             next_come_ins.get(tag).wake();
             
-            if(KThread.currentThread().getName() == a_tagname.get(tag)){ //indicate this is A
+            if(KThread.currentThread().getName() == a_name.get(tag)){ //indicate this is A
                 tags_numbers.get(tag).clear(); //clear the tag for the next two threads
                 pair_finished.get(tag).wakeAll(); //the first pair has finished, wake the next pair
             }
