@@ -191,8 +191,8 @@ public class Condition2 {
 	public static void cvTest5() {
 		final Lock lock = new Lock();
 		// final Condition empty = new Condition(lock);
-		final Condition2 empty = new Condition2(lock, "empty: ");
-		final Condition2 full = new Condition2(lock, "full: ");
+		final Condition2 empty = new Condition2(lock);
+		final Condition2 full = new Condition2(lock);
 		final LinkedList<Integer> list = new LinkedList<>();
 
 		KThread consumer = new KThread( new Runnable () {
@@ -310,8 +310,8 @@ public class Condition2 {
 
 	public static void mySleepForTest2(){
 		final Lock lock = new Lock();
-		final Condition2 cv0 = new Condition2(lock, "cv0");
-		final Condition2 cv1 = new Condition2(lock, "cv1");
+		final Condition2 cv0 = new Condition2(lock);
+		final Condition2 cv1 = new Condition2(lock);
 		final LinkedList<Integer> list = new LinkedList<>();
 		int waitTime[] = {1, 10, 100, 1000, 10000};
 
