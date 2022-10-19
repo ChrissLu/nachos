@@ -3,25 +3,32 @@ package nachos.threads;
 import nachos.machine.*;
 
 import java.util.LinkedList;
+import java.util.LinkedHashMap;
+import java.util.Iterator;
+import java.util.Map;
 
 /**
  * An implementation of condition variables that disables interrupt()s for
  * synchronization.
- * 
+ *
  * <p>
  * You must implement this.
- * 
+ *
  * @see nachos.threads.Condition
  */
 public class Condition2 {
 	/**
 	 * Allocate a new condition variable.
-	 * 
+	 *
 	 * @param conditionLock the lock associated with this condition variable.
 	 * The current thread must hold this lock whenever it uses <tt>sleep()</tt>,
 	 * <tt>wake()</tt>, or <tt>wakeAll()</tt>.
 	 */
 	public Condition2(Lock conditionLock) {	this.conditionLock = conditionLock;	}
+	public Condition2(Lock conditionLock, String name) {
+		this.conditionLock = conditionLock;	
+		this.name = name;
+	}
 
 	/**
 	 * Atomically release the associated lock and go to sleep on this condition
@@ -34,12 +41,13 @@ public class Condition2 {
 
 		boolean intStatus = Machine.interrupt().disable();
 
-		waitQueue.waitForAccess(KThread.currentThread());
 		conditionLock.release();
+		waitQueue.put(KThread.currentThread(), (long) -1);
 		KThread.sleep();
 
-		Machine.interrupt().restore(intStatus);
+		waitQueue.remove(KThread.currentThread());
 		conditionLock.acquire();
+		Machine.interrupt().restore(intStatus);
 	}
 
 	/**
@@ -51,13 +59,27 @@ public class Condition2 {
 
 		boolean intStatus = Machine.interrupt().disable();
 
-		KThread thread = waitQueue.nextThread();
-		if(thread != null) {
-			if(!ThreadedKernel.alarm.cancel(thread)){
+		Iterator<Map.Entry<KThread, Long>> iter = waitQueue.entrySet().iterator();
+		Map.Entry<KThread, Long> entry = null;
+		while(iter.hasNext()){
+			entry = iter.next();
+			KThread thread = entry.getKey();
+			long time = entry.getValue();
+
+			if(time == -1){
 				thread.ready();
+				iter.remove();
+				break;
+			} else if(time < Machine.timer().getTime()){
+				iter.remove();
+			} else{
+				if(!ThreadedKernel.alarm.cancel(thread)){
+					thread.ready();
+				}
+				iter.remove();
+				break;
 			}
 		}
-
 		Machine.interrupt().restore(intStatus);
 	}
 
@@ -70,18 +92,28 @@ public class Condition2 {
 
 		boolean intStatus = Machine.interrupt().disable();
 
-		KThread thread = waitQueue.nextThread();
-		while(thread != null) {
-			if(!ThreadedKernel.alarm.cancel(thread)){
+		Iterator<Map.Entry<KThread, Long>> iter = waitQueue.entrySet().iterator();
+		while(iter.hasNext()){
+			KThread thread = iter.next().getKey();
+			long time = iter.next().getValue();
+
+			if(time == -1){
 				thread.ready();
+				iter.remove();
+			} else if(time < Machine.timer().getTime()){
+				iter.remove();
+			} else{
+				if(!ThreadedKernel.alarm.cancel(thread)){
+					thread.ready();
+				}
+				iter.remove();
 			}
-			thread = waitQueue.nextThread();
 		}
 
 		Machine.interrupt().restore(intStatus);
 	}
 
-        /**
+	/**
 	 * Atomically release the associated lock and go to sleep on
 	 * this condition variable until either (1) another thread
 	 * wakes it using <tt>wake()</tt>, or (2) the specified
@@ -94,18 +126,20 @@ public class Condition2 {
 
 		boolean intStatus = Machine.interrupt().disable();
 
-		waitQueue.waitForAccess(KThread.currentThread());
 		conditionLock.release();
+		waitQueue.put(KThread.currentThread(), Machine.timer().getTime() + timeout);
 		ThreadedKernel.alarm.waitUntil(timeout);
 
-		Machine.interrupt().restore(intStatus);
+		waitQueue.remove(KThread.currentThread());
 		conditionLock.acquire();
+		Machine.interrupt().restore(intStatus);
 	}
 
 	private Lock conditionLock;
 
-	private ThreadQueue waitQueue = ThreadedKernel.scheduler
-			.newThreadQueue(false);
+	private LinkedHashMap<KThread, Long> waitQueue = new LinkedHashMap<KThread, Long>();
+
+	private String name;
 
 	private static class InterlockTest {
 		private static Lock lock;
@@ -144,8 +178,7 @@ public class Condition2 {
 			// call to join and instead uncomment the loop with
 			// yields; the loop has the same effect, but is a kludgy
 			// way to do it.
-			// ping.join();
-			for (int i = 0; i < 50; i++) { KThread.currentThread().yield(); }
+			ping.join();
 		}
 	}
 
@@ -158,36 +191,42 @@ public class Condition2 {
 	public static void cvTest5() {
 		final Lock lock = new Lock();
 		// final Condition empty = new Condition(lock);
-		final Condition2 empty = new Condition2(lock);
+		final Condition2 empty = new Condition2(lock, "empty: ");
+		final Condition2 full = new Condition2(lock, "full: ");
 		final LinkedList<Integer> list = new LinkedList<>();
 
 		KThread consumer = new KThread( new Runnable () {
 			public void run() {
-				lock.acquire();
-				while(list.isEmpty()){
-					empty.sleep();
-				}
-				Lib.assertTrue(list.size() == 5, "List should have 5 values.");
-				while(!list.isEmpty()) {
+				while(true){
+					lock.acquire();
+					while(list.isEmpty()){
+						empty.sleep();
+					}
 					// context swith for the fun of it
 					KThread.currentThread().yield();
 					System.out.println("Removed " + list.removeFirst());
+					full.wake();
+					lock.release();
 				}
-				lock.release();
 			}
 		});
 
 		KThread producer = new KThread( new Runnable () {
 			public void run() {
-				lock.acquire();
-				for (int i = 0; i < 5; i++) {
+				int i = 0;
+				while(true){
+					lock.acquire();
+					while(list.size() > 5){
+						full.sleep();
+					}
 					list.add(i);
 					System.out.println("Added " + i);
+					i++;
 					// context swith for the fun of it
 					KThread.currentThread().yield();
+					empty.wake();
+					lock.release();
 				}
-				empty.wake();
-				lock.release();
 			}
 		});
 
@@ -202,9 +241,8 @@ public class Condition2 {
 		// implemented join yet, then comment out the calls to join
 		// and instead uncomment the loop with yield; the loop has the
 		// same effect, but is a kludgy way to do it.
-		// consumer.join();
-		// producer.join();
-		for (int i = 0; i < 50; i++) { KThread.currentThread().yield(); }
+		consumer.join();
+		producer.join();
 	}
 
 	public static void sleepForTest1 () {
@@ -222,4 +260,117 @@ public class Condition2 {
 		lock.release();
 	}
 
+	public static void mySleepForTest(){
+		final Lock lock = new Lock();
+		final Condition2 cv = new Condition2(lock);
+
+		KThread t1 = new KThread( new Runnable () {
+			public void run () {
+				lock.acquire();
+				long t0 = Machine.timer().getTime();
+				System.out.println("T1 sleep time: " + t0);
+				cv.sleepFor(1000);
+				long t1 = Machine.timer().getTime();
+				System.out.println("T1 wake time: " + t1);
+				cv.wake();
+
+				t0 = Machine.timer().getTime();
+				System.out.println("T1 sleep time: " + t0);
+				cv.sleepFor(5000);
+				t1 = Machine.timer().getTime();
+				System.out.println("T1 wake time: " + t1);
+
+				lock.release();
+			}
+		});
+
+		KThread t2 = new KThread( new Runnable () {
+			public void run () {
+				lock.acquire();
+				long t0 = Machine.timer().getTime();
+				System.out.println("T2 sleep time: " + t0);
+				cv.sleepFor(2000);
+				long t1 = Machine.timer().getTime();
+				System.out.println("T2 wake time: " + t1);
+
+				t0 = Machine.timer().getTime();
+				System.out.println("T2 sleep time: " + t0);
+				cv.sleepFor(2000);
+				t1 = Machine.timer().getTime();
+				System.out.println("T2 wake time: " + t1);
+				
+				cv.wake();
+				lock.release();
+			}
+		});
+
+		t1.setName("T1");
+		t2.setName("T2");
+		t1.fork();
+		t2.fork();
+		t1.join();
+		t2.join();
+	}
+
+	public static void mySleepForTest2(){
+		final Lock lock = new Lock();
+		final Condition2 cv0 = new Condition2(lock, "cv0");
+		final Condition2 cv1 = new Condition2(lock, "cv1");
+		final LinkedList<Integer> list = new LinkedList<>();
+		int waitTime[] = {1, 10, 100, 1000, 10000};
+
+		KThread ping = new KThread( new Runnable () {
+			public void run () {
+				lock.acquire();
+				for (int i = 0; i < waitTime.length; i++) {
+					while(list.isEmpty())
+					{
+						long t0 = Machine.timer().getTime();
+						cv1.sleepFor(waitTime[i]);  // wait
+						long t1 = Machine.timer().getTime();
+						System.out.println (KThread.currentThread().getName() +
+								" woke up, slept for " + (t1 - t0) + " ticks");
+					}
+					list.remove();
+					System.out.println(KThread.currentThread().getName() + " remove 1 element");
+
+					lock.release();
+					for (int j = 0; j < 50; j++) {
+						KThread.currentThread().yield();
+					}
+					lock.acquire();
+					if(list.isEmpty())
+						cv0.wake();   // signal
+				}
+				lock.release();
+			}
+		});
+
+		KThread pong = new KThread( new Runnable () {
+			public void run () {
+				lock.acquire();
+				for (int i = 0; i < waitTime.length; i++) {
+					while(!list.isEmpty())
+					{
+						long t0 = Machine.timer().getTime();
+						cv0.sleepFor(waitTime[i]);  // wait
+						long t1 = Machine.timer().getTime();
+						System.out.println (KThread.currentThread().getName() +
+								" woke up, slept for " + (t1 - t0) + " ticks");
+					}
+					list.add(1);
+					System.out.println(KThread.currentThread().getName() + " add 1 element");
+					cv1.wake();   // signal
+				}
+				lock.release();
+			}
+		});
+		ping.setName("Ping");
+		pong.setName("Pong");
+		ping.fork();
+		pong.fork();
+		ping.join();
+		pong.join();
+		//for (int i = 0; i < 5000; i++) { KThread.currentThread().yield(); }
+	}
 }

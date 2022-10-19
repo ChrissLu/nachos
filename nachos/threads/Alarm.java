@@ -4,7 +4,8 @@ import nachos.machine.*;
 
 import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
+import java.util.TreeMap;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -25,7 +26,6 @@ public class Alarm {
 				timerInterrupt();
 			}
 		});
-		sleepingThreads = new LinkedHashMap<>();
 	}
 
 	/**
@@ -36,25 +36,20 @@ public class Alarm {
 	 */
 	public void timerInterrupt() {
 		boolean intStatus = Machine.interrupt().disable();
-		if(sleepingThreads.isEmpty()){
-			return;
-		}
-
-
-		Iterator<Map.Entry<KThread, Long>> it = sleepingThreads.entrySet().iterator();
-		KThread currentThread = null;
-		long wakeTime = 0;
+		
+		Iterator<Map.Entry<Long, KThread>> it = sleepingThreads.entrySet().iterator();
+		Map.Entry<Long, KThread> entry = null;
 		while (it.hasNext()) {
-			Map.Entry<KThread, Long> entry = it.next();
-			currentThread = entry.getKey();
-			wakeTime = entry.getValue();
-			if(wakeTime <= Machine.timer().getTime()){
-				currentThread.ready();
-			}
+			entry = it.next();
+			if(entry.getKey() > Machine.timer().getTime()) {
+                break;
+            }
+			threadMap.remove(entry.getValue());
+			entry.getValue().ready();
+			it.remove();
 		}
 		Machine.interrupt().restore(intStatus);
 		KThread.currentThread().yield();
-
 	}
 
 	/**
@@ -74,13 +69,12 @@ public class Alarm {
 		if(x <= 0){
 			return;
 		}
-		boolean intStatus = Machine.interrupt().disable();
-
 		long wakeTime = Machine.timer().getTime() + x;
+		boolean intStatus = Machine.interrupt().disable();
 		KThread currentThread = KThread.currentThread();
-		sleepingThreads.put(currentThread, wakeTime);
+		sleepingThreads.put(wakeTime, currentThread);
+		threadMap.put(currentThread, wakeTime);
 		KThread.sleep();
-
 		Machine.interrupt().restore(intStatus);
 
 	}
@@ -95,8 +89,23 @@ public class Alarm {
 	 * @param thread the thread whose timer should be cancelled.
 	 */
 	public boolean cancel(KThread thread) {
-		return false;
+		boolean intStatus = Machine.interrupt().disable();
+		if(!threadMap.containsKey(thread)){
+			Machine.interrupt().restore(intStatus);
+			return false;
+		}
+
+		long wakeTime = threadMap.get(thread);
+		sleepingThreads.remove(wakeTime);
+		threadMap.remove(thread);
+		thread.ready();
+
+		Machine.interrupt().restore(intStatus);
+		return true;
 	}
+
+	private Map<Long, KThread> sleepingThreads = new TreeMap<Long, KThread>();
+	private Map<KThread, Long> threadMap = new HashMap<KThread, Long>();
 
 	// Add Alarm testing code to the Alarm class
 
@@ -110,7 +119,7 @@ public class Alarm {
 			t1 = Machine.timer().getTime();
 			System.out.println ("alarmTest1: waited for " + (t1 - t0) + " ticks");
 		}
-	}
+    }
 
 	// Implement more test methods here ...
 
@@ -120,6 +129,4 @@ public class Alarm {
 
 		// Invoke your other test methods here ...
 	}
-
-	private static LinkedHashMap<KThread, Long> sleepingThreads;
 }
