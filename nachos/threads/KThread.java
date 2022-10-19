@@ -209,7 +209,6 @@ public class KThread {
 		if(joinedThread != null){
 			if(joinedThread.status == statusBlocked)
                 joinedThread.ready();
-        	}
 		}
 
 		sleep();
@@ -297,7 +296,6 @@ public class KThread {
 
 		Lib.assertTrue(joinCount == 0);
 		joinCount++;
-		System.out.println("start:" + status);
 
 		if(status == statusFinished){
 			return;
