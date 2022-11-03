@@ -28,6 +28,10 @@ public class UserProcess {
 		pageTable = new TranslationEntry[numPhysPages];
 		for (int i = 0; i < numPhysPages; i++)
 			pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
+
+		// set stdin and stdout
+		openFileTable[0] = UserKernel.console.openForReading();
+		openFileTable[1] = UserKernel.console.openForWriting();
 	}
 
 	/**
@@ -374,6 +378,151 @@ public class UserProcess {
 		return 0;
 	}
 
+	private int getNextFreeFileDescripter(){
+		for(int i=0;i<openFileTable.length;++i){
+			if(openFileTable[i] == null)
+				return i;
+		}
+		return -1;
+	}
+
+	private int handleCreate(int strVaddr){
+		int fd = getNextFreeFileDescripter();
+		if(fd == -1){
+			// could not open more files
+			return -1;
+		}
+		String fileName = readVirtualMemoryString(strVaddr, 256);
+		if(fileName == null){
+			// the length of filename exceeds 256 chars
+			return -1;
+		}
+		//System.out.println("filename: " + fileName);
+		OpenFile f = ThreadedKernel.fileSystem.open(fileName, true);
+		if(f == null){
+			// file could not be opened
+			return -1;
+		}
+		openFileTable[fd] = f;
+		return fd;
+	}
+
+	private int handleOpen(int strVaddr){
+		int fd = getNextFreeFileDescripter();
+		if(fd == -1){
+			// could not open more files
+			return -1;
+		}
+		String fileName = readVirtualMemoryString(strVaddr, 256);
+		if(fileName == null){
+			// the length of filename exceeds 256 chars
+			return -1;
+		}
+		OpenFile f = ThreadedKernel.fileSystem.open(fileName, false);
+		if(f == null){
+			// file could not be opened
+			return -1;
+		}
+		openFileTable[fd] = f;
+		return fd;
+	}
+
+	private int handleRead(int fd, int bufVaddr, int count){
+		if(count < 0){
+			return -1;
+		}
+		if(fd < 0 || fd >= openFileTable.length){
+			return -1;
+		}
+		if(openFileTable[fd] == null){
+			// the file descriptor does not exist
+			return -1;
+		}
+
+		OpenFile f = openFileTable[fd];
+		byte[] buf = new byte[pageSize];
+		int totRead = 0;
+		int startPos = 0;
+		while(count > 0){
+			int readCnt = f.read(buf, 0, Math.min(buf.length, count));
+			if(readCnt == -1){
+				return -1;
+			}
+			if(readCnt == 0){
+				break;
+			}
+			int nw = writeVirtualMemory(bufVaddr + totRead, buf, 0, readCnt);
+			if(nw != readCnt){
+				// memory overflow
+				return -1;
+			}
+			totRead += readCnt;
+			startPos += readCnt;
+			count -= readCnt;
+		}
+		return totRead;
+	}
+
+	private int handleWrite(int fd, int bufVaddr, int count){
+		if(count < 0){
+			return -1;
+		}
+		if(fd < 0 || fd >= openFileTable.length){
+			return -1;
+		}
+		if(openFileTable[fd] == null){
+			// the file descriptor does not exist
+			return -1;
+		}
+
+		OpenFile f = openFileTable[fd];
+		byte[] buf = new byte[pageSize];
+		int totWrite = 0;
+		int startPos = 0;
+		while(count > 0){
+			int nr = readVirtualMemory(bufVaddr + totWrite, buf, 0, Math.min(buf.length, count));
+			if(nr != Math.min(buf.length, count)){
+				return -1;
+			}
+			int writeCnt = f.write(buf, 0, nr);
+
+			if(writeCnt == -1){
+				return -1;
+			}
+			totWrite += writeCnt;
+			count -= writeCnt;
+		}
+		return totWrite;
+	}
+
+	private int handleClose(int fd){
+		if(fd < 0 || fd >= openFileTable.length){
+			return -1;
+		}
+		if(openFileTable[fd] == null){
+			// the file descriptor does not exist
+			return -1;
+		}
+
+		OpenFile f = openFileTable[fd];
+		f.close();
+		openFileTable[fd] = null;
+		return 0;
+	}
+
+	private int handleUnlink(int strVaddr){
+		String fileName = readVirtualMemoryString(strVaddr, 256);
+		if(fileName == null){
+			// the length of filename exceeds 256 chars
+			return -1;
+		}
+		boolean ok = ThreadedKernel.fileSystem.remove(fileName);
+		if(ok)
+			return 0;
+		else
+			return -1;
+	}
+
 	private static final int syscallHalt = 0, syscallExit = 1, syscallExec = 2,
 			syscallJoin = 3, syscallCreate = 4, syscallOpen = 5,
 			syscallRead = 6, syscallWrite = 7, syscallClose = 8,
@@ -446,7 +595,18 @@ public class UserProcess {
 			return handleHalt();
 		case syscallExit:
 			return handleExit(a0);
-
+		case syscallCreate:
+			return handleCreate(a0);
+		case syscallOpen:
+			return handleOpen(a0);
+		case syscallRead:
+			return handleRead(a0, a1, a2);
+		case syscallWrite:
+			return handleWrite(a0, a1, a2);
+		case syscallClose:
+			return handleClose(a0);
+		case syscallUnlink:
+			return handleUnlink(a0);
 		default:
 			Lib.debug(dbgProcess, "Unknown syscall " + syscall);
 			Lib.assertNotReached("Unknown system call!");
@@ -495,11 +655,13 @@ public class UserProcess {
 	protected final int stackPages = 8;
 
 	/** The thread that executes the user-level program. */
-        protected UThread thread;
+	protected UThread thread;
     
 	private int initialPC, initialSP;
 
 	private int argc, argv;
+
+	private OpenFile[] openFileTable = new OpenFile[16];
 
 	private static final int pageSize = Processor.pageSize;
 
