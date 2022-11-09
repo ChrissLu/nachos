@@ -4,7 +4,7 @@ import nachos.machine.*;
 import nachos.threads.*;
 import nachos.userprog.*;
 import nachos.vm.*;
-
+import java.util.*;
 import java.io.EOFException;
 
 /**
@@ -32,6 +32,13 @@ public class UserProcess {
 		// set stdin and stdout
 		openFileTable[0] = UserKernel.console.openForReading();
 		openFileTable[1] = UserKernel.console.openForWriting();
+		for(int i=0;;i++){
+			if (pidList.contains(i)) continue;
+			pid = i; 
+			pidList.add(i);
+			break;
+		}
+		childList = new ArrayList<UserProcess>();
 	}
 
 	/**
@@ -355,9 +362,11 @@ public class UserProcess {
 	 * Handle the halt() system call.
 	 */
 	private int handleHalt() {
-
+		if(KThread.currentThread().getName() == Machine.getShellProgramName()){        //is the root process
 		Machine.halt();
-
+		}else{
+			return -1;
+		}
 		Lib.assertNotReached("Machine.halt() did not halt machine!");
 		return 0;
 	}
@@ -372,11 +381,106 @@ public class UserProcess {
 		// can grade your implementation.
 
 		Lib.debug(dbgProcess, "UserProcess.handleExit (" + status + ")");
-		// for now, unconditionally terminate with just one process
-		Kernel.kernel.terminate();
+
+
+		for (OpenFile f:openFileTable){
+			if(f!=null) f.close();
+		}
+		for(UserProcess child:childList){
+			child.parent = null;
+		}
+		if(parent!=null){
+			parent.childstatus = status; //what if there are multiple children?
+			parent.childList.remove(this);
+		}
+		pidList.remove(pid);
+
+		//how to clean memory for this process???????????  may related to multi-programming
+		System.out.println(KThread.currentThread().getName());
+		System.out.println(Machine.getShellProgramName());
+		
+		if(true){         //how to determine this is the last process?
+			Kernel.kernel.terminate();
+		}else{
+			KThread.currentThread().finish();
+		}		
+		
+		return 0;
+	}
+
+
+
+	
+	/**
+	 * Handle the exec() system call.
+	 */
+	private int handleExec(int strVaddr,int argc,int argv) {
+		UserProcess child = newUserProcess();
+		int childPID = child.pid;
+		child.parent = this;
+		this.childList.add(child);
+		
+		String fileName = readVirtualMemoryString(strVaddr, 256);
+		String[] args = new String[argc];
+		for(int i=0;i<argc;i++){
+			byte[] adr = new byte[4];
+			readVirtualMemory(argv+4*i,adr);
+			args[i] = readVirtualMemoryString(Lib.bytesToInt(adr,0), 256);
+		}
+
+		//System.out.println(args[1]);
+
+		if (!child.execute(fileName,args)) {
+			System.out.println ("could not find '" + fileName + "', aborting.");
+			Lib.assertTrue(false);
+		}
+
+		return childPID;
+	}
+
+	// private int bytesToInt(byte[] b) {
+	// 	int value;	
+	// 	value = (int) ((b[0]&0xFF) 
+	// 				| ((b[1]<<8) & 0xFF00)
+	// 				| ((b[2]<<16)& 0xFF0000) 
+	// 				| ((b[3]<<24) & 0xFF000000));
+	// 	return value;
+	// }
+
+
+	/**
+	 * Handle the join() system call.
+	 */
+	private int handleJoin(int processID, int statusVaddr) {
+		UserProcess child = this;
+		//boolean ischild = false;
+		for(UserProcess c:childList){
+			if (c.pid == processID) {
+				child = c;
+				//ischild = true;
+				break;
+			}
+		}
+		if(child == this) return -1;
+		//Lib.assertTrue(ischild,"the input PID does not belong to a child process");
+
+		try{
+			child.thread.join();
+			byte[] toWrite = Lib.bytesFromInt(childstatus);
+			writeVirtualMemory(statusVaddr,toWrite);
+			return 1;
+		}
+		catch(Exception e){ //should I use try catch?
+			
+			child.thread.finish(); //???
+		}
+
 
 		return 0;
 	}
+
+
+
 
 	private int getNextFreeFileDescripter(){
 		for(int i=0;i<openFileTable.length;++i){
@@ -595,6 +699,10 @@ public class UserProcess {
 			return handleHalt();
 		case syscallExit:
 			return handleExit(a0);
+		case syscallExec:
+			return handleExec(a0, a1, a2);
+		case syscallJoin:
+			return handleJoin(a0, a1);
 		case syscallCreate:
 			return handleCreate(a0);
 		case syscallOpen:
@@ -666,4 +774,14 @@ public class UserProcess {
 	private static final int pageSize = Processor.pageSize;
 
 	private static final char dbgProcess = 'a';
+
+	protected int pid;
+
+	private static ArrayList<Integer> pidList = new ArrayList<Integer>();
+
+	protected UserProcess parent;
+
+	protected ArrayList<UserProcess> childList;
+
+	private int childstatus;
 }
