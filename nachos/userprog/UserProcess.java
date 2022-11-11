@@ -6,6 +6,7 @@ import nachos.userprog.*;
 import nachos.vm.*;
 
 import java.io.EOFException;
+import java.util.LinkedList;
 
 /**
  * Encapsulates the state of a user process that is not contained in its user
@@ -24,10 +25,10 @@ public class UserProcess {
 	 * Allocate a new process.
 	 */
 	public UserProcess() {
-		int numPhysPages = Machine.processor().getNumPhysPages();
-		pageTable = new TranslationEntry[numPhysPages];
-		for (int i = 0; i < numPhysPages; i++)
-			pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
+//		int numPhysPages = Machine.processor().getNumPhysPages();
+//		pageTable = new TranslationEntry[numPhysPages];
+//		for (int i = 0; i < numPhysPages; i++)
+//			pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
 
 		// set stdin and stdout
 		openFileTable[0] = UserKernel.console.openForReading();
@@ -152,11 +153,20 @@ public class UserProcess {
 		byte[] memory = Machine.processor().getMemory();
 
 		// for now, just assume that virtual addresses equal physical addresses
-		if (vaddr < 0 || vaddr >= memory.length)
+		int pageByteLength = (int)(Math.log(pageSize) / Math.log(2));
+		int mask = 0x3FF;
+		int vpn = (vaddr - (vaddr & mask)) >> pageByteLength;
+
+		if(vpn >= pageTable.length){
+			return 0;
+		}
+		int ppn = pageTable[vpn].ppn;
+		int paddr = (ppn << pageByteLength) + ((vaddr & mask));
+		if (paddr < 0 || paddr >= memory.length)
 			return 0;
 
-		int amount = Math.min(length, memory.length - vaddr);
-		System.arraycopy(memory, vaddr, data, offset, amount);
+		int amount = Math.min(length, memory.length - paddr);
+		System.arraycopy(memory, paddr, data, offset, amount);
 
 		return amount;
 	}
@@ -194,11 +204,19 @@ public class UserProcess {
 		byte[] memory = Machine.processor().getMemory();
 
 		// for now, just assume that virtual addresses equal physical addresses
-		if (vaddr < 0 || vaddr >= memory.length)
+		int pageByteLength = (int)(Math.log(pageSize) / Math.log(2));
+		int mask = 0x3FF;
+		int vpn = (vaddr - (vaddr & mask)) >> pageByteLength;
+		if(vpn >= pageTable.length){
+			return 0;
+		}
+		int ppn = pageTable[vpn].ppn;
+		int paddr = (ppn << pageByteLength) + ((vaddr & mask));
+		if (paddr < 0 || paddr >= memory.length)
 			return 0;
 
-		int amount = Math.min(length, memory.length - vaddr);
-		System.arraycopy(data, offset, memory, vaddr, amount);
+		int amount = Math.min(length, memory.length - paddr);
+		System.arraycopy(data, offset, memory, paddr, amount);
 
 		return amount;
 	}
@@ -298,12 +316,17 @@ public class UserProcess {
 	 * @return <tt>true</tt> if the sections were successfully loaded.
 	 */
 	protected boolean loadSections() {
-		if (numPages > Machine.processor().getNumPhysPages()) {
+		if (numPages > UserKernel.freePhysicalPages.size()) {
 			coff.close();
 			Lib.debug(dbgProcess, "\tinsufficient physical memory");
 			return false;
 		}
+		pageTable = new TranslationEntry[numPages];
 
+		for(int i = 0; i < numPages; i++){
+			pageTable[i] = new TranslationEntry(i, UserKernel.freePhysicalPages.remove(), true, false, false,false);
+		}
+		int n = 0;
 		// load sections
 		for (int s = 0; s < coff.getNumSections(); s++) {
 			CoffSection section = coff.getSection(s);
@@ -311,12 +334,16 @@ public class UserProcess {
 			Lib.debug(dbgProcess, "\tinitializing " + section.getName()
 					+ " section (" + section.getLength() + " pages)");
 
+			lock.acquire();
 			for (int i = 0; i < section.getLength(); i++) {
 				int vpn = section.getFirstVPN() + i;
+				pageTable[vpn].readOnly = section.isReadOnly();
 
-				// for now, just assume virtual addresses=physical addresses
-				section.loadPage(i, vpn);
+				// Get the ppn from pageTable
+				section.loadPage(i, pageTable[vpn].ppn);
 			}
+			lock.release();
+
 		}
 
 		return true;
@@ -326,6 +353,11 @@ public class UserProcess {
 	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
+		lock.acquire();
+		for(int i = 0; i < pageTable.length; i++){
+			UserKernel.freePhysicalPages.add(pageTable[i].ppn);
+		}
+		lock.release();
 	}
 
 	/**
@@ -666,4 +698,6 @@ public class UserProcess {
 	private static final int pageSize = Processor.pageSize;
 
 	private static final char dbgProcess = 'a';
+
+	private static Lock lock = new Lock();
 }
