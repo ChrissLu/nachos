@@ -47,6 +47,7 @@ public class UserProcess {
 		processCounter++;
 		childList = new ArrayList<UserProcess>();
 		childstatusMap = new HashMap<Integer,Integer>();
+		abnormal = false;
 	}
 
 	/**
@@ -368,6 +369,7 @@ public class UserProcess {
 	 */
 	protected void unloadSections() {
 		lock.acquire();
+		if(pageTable!=null)
 		for(int i = 0; i < pageTable.length; i++){
 			UserKernel.freePhysicalPages.add(pageTable[i].ppn);
 		}
@@ -404,6 +406,7 @@ public class UserProcess {
 		if(KThread.currentThread().getName() == Machine.getShellProgramName()){        //is the root process
 			Machine.halt();
 		}else{
+			System.out.println("halt not called by root");
 			return -1;
 		}
 		Lib.assertNotReached("Machine.halt() did not halt machine!");
@@ -421,7 +424,7 @@ public class UserProcess {
 
 		Lib.debug(dbgProcess, "UserProcess.handleExit (" + status + ")");
 
-		System.out.println("exiting " + pid);
+		System.out.println("exiting pid " + pid);
 
 		for (OpenFile f:openFileTable){
 			if(f!=null) f.close();
@@ -433,16 +436,11 @@ public class UserProcess {
 			parent.childstatusMap.put(pid,status);
 			parent.childList.remove(this); //this sentence could be deleted
 		}
-		// System.out.println("############" + pid);
-		// System.out.println(pidList.size());
 		
 		//pidList.remove(Integer.valueOf(pid));
 
 		unloadSections();  // free up memory 
-		// System.out.println(KThread.currentThread().getName());
-		// System.out.println(Machine.getShellProgramName());
 
-		
 		if(--processCounter == 0){         //the last process
 			Kernel.kernel.terminate();
 		}else{
@@ -472,15 +470,15 @@ public class UserProcess {
 			args[i] = readVirtualMemoryString(Lib.bytesToInt(adr,0), 256);
 		}
 
-		//System.out.println(args[1]);
 
 		if (!child.execute(fileName,args)) {
 			System.out.println ("could not find '" + fileName + "', aborting.");
 			Lib.assertTrue(false);
 		}
-		System.out.print("children of pid "+ pid + " are ");
-		for(UserProcess c:childList) if(c!=null) System.out.print(" "+c.pid);
-		System.out.println();
+
+		// System.out.print("children of pid "+ pid + " are ");
+		// for(UserProcess c:childList) if(c!=null) System.out.print(" "+c.pid);
+		// System.out.println();
 		return childPID;
 	}
 
@@ -501,8 +499,6 @@ public class UserProcess {
 
 		UserProcess child = this;
 		for(UserProcess c:childList){
-			System.out.print(c.pid + " ");
-			System.out.println();
 			if (c.pid == processID) {
 				child = c;
 				break;
@@ -518,20 +514,14 @@ public class UserProcess {
 			return -1;
 		}
 
-		try{
-			child.thread.join();
-			byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
-			writeVirtualMemory(statusVaddr,toWrite);
-			childstatusMap.remove(processID);
-			return 1;
-		}
-		catch(Exception e){ //should I use try catch?
-			
-			child.thread.finish(); //???
-		}
+		child.thread.join();
+		byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
+		writeVirtualMemory(statusVaddr,toWrite);
+		childstatusMap.remove(processID);
 
+		if(child.abnormal) return 0;
+		return 1;
 
-		return 0;
 	}
 
 
@@ -799,12 +789,12 @@ public class UserProcess {
 			break;
 
 		default:
+			abnormal = true;
 			handleExit(0);
-			Lib.debug(dbgProcess, "Unexpected exception: "
-					+ Processor.exceptionNames[cause]);
-			Lib.assertNotReached("Unexpected exception");
+
 		}
 	}
+
 
 	/** The program being run by this process. */
 	protected Coff coff;
@@ -841,9 +831,9 @@ public class UserProcess {
 
 	protected ArrayList<UserProcess> childList;
 
-	private int childstatus;
+	protected Map<Integer,Integer> childstatusMap;
 
-	private Map<Integer,Integer> childstatusMap;
+	protected boolean abnormal;
 
 	private static int pidCounter = 0; //to simply assign pid (could be improved by pidlist or something)
 

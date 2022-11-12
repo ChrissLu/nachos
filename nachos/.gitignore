@@ -2,3 +2,4 @@ proj?/nachos/
 test/*.o
 test/*.coff
 test/*.a
+test/*.txt
