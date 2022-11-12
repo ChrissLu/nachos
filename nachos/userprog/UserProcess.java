@@ -344,16 +344,19 @@ public class UserProcess {
 	 * @return <tt>true</tt> if the sections were successfully loaded.
 	 */
 	protected boolean loadSections() {
+		lock.acquire();
 		if (numPages > UserKernel.freePhysicalPages.size()) {
 			coff.close();
 			Lib.debug(dbgProcess, "\tinsufficient physical memory");
 			return false;
 		}
+		lock.release();
 		pageTable = new TranslationEntry[numPages];
-
+		lock.acquire();
 		for(int i = 0; i < numPages; i++){
 			pageTable[i] = new TranslationEntry(i, UserKernel.freePhysicalPages.remove(), true, false, false,false);
 		}
+		lock.release();
 		int n = 0;
 		// load sections
 		for (int s = 0; s < coff.getNumSections(); s++) {
@@ -362,7 +365,7 @@ public class UserProcess {
 			Lib.debug(dbgProcess, "\tinitializing " + section.getName()
 					+ " section (" + section.getLength() + " pages)");
 
-			lock.acquire();
+
 			for (int i = 0; i < section.getLength(); i++) {
 				int vpn = section.getFirstVPN() + i;
 				pageTable[vpn].readOnly = section.isReadOnly();
@@ -370,7 +373,6 @@ public class UserProcess {
 				// Get the ppn from pageTable
 				section.loadPage(i, pageTable[vpn].ppn);
 			}
-			lock.release();
 
 		}
 
