@@ -42,9 +42,11 @@ public class UserProcess {
 		// 	System.out.println();
 		// 	break;
 		// }
+		lock.acquire();
 		pidCounter++;
 		pid = pidCounter;
 		processCounter++;
+		lock.release();
 		childList = new ArrayList<UserProcess>();
 		childstatusMap = new HashMap<Integer,Integer>();
 		abnormal = false;
@@ -445,7 +447,7 @@ public class UserProcess {
 		}
 		if(parent!=null){
 			parent.childstatusMap.put(pid,status);
-			parent.childList.remove(this); //this sentence could be deleted
+			//parent.childList.remove(this); //this sentence could be deleted
 		}
 		
 		//pidList.remove(Integer.valueOf(pid));
@@ -515,22 +517,18 @@ public class UserProcess {
 				break;
 			}
 		}
-		if(child == this) {    //process id not included in the childList
-			if(childstatusMap.containsKey(processID)){  //child finshed before join
-				byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
-				writeVirtualMemory(statusVaddr,toWrite);
-				childstatusMap.remove(processID);
-				return 1;
-			}
-			return -1;
-		}
+		if(child == this) return -1;
+		if(!childstatusMap.containsKey(processID)) return -1;
 
 		child.thread.join();
-		byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
-		writeVirtualMemory(statusVaddr,toWrite);
-		childstatusMap.remove(processID);
-
 		if(child.abnormal) return 0;
+
+		if(statusVaddr != 0x0){     // not NULL pointer
+			byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
+			int w = writeVirtualMemory(statusVaddr,toWrite);
+			if(w==0) return -1; //invalid status pointer
+		}
+		childstatusMap.remove(processID);
 		return 1;
 
 	}
@@ -801,6 +799,7 @@ public class UserProcess {
 
 		default:
 			abnormal = true;
+			System.out.println("unexpected exception, exit");
 			handleExit(0);
 
 		}
@@ -846,7 +845,7 @@ public class UserProcess {
 
 	protected UserProcess parent;
 
-	protected ArrayList<UserProcess> childList;
+	protected ArrayList<UserProcess> childList; //all children in history
 
 	protected Map<Integer,Integer> childstatusMap;
 
