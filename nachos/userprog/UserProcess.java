@@ -165,24 +165,28 @@ public class UserProcess {
 				&& offset + length <= data.length);
 
 		byte[] memory = Machine.processor().getMemory();
-
-		// for now, just assume that virtual addresses equal physical addresses
-		int pageByteLength = (int)(Math.log(pageSize) / Math.log(2));
-		int mask = 0x3FF;
-		int vpn = (vaddr - (vaddr & mask)) >> pageByteLength;
-
+		int totalAmount = 0;
+		int vpn = (vaddr & vpnMask) >> pageByteLength;
 		if(vpn >= pageTable.length){
 			return 0;
 		}
-		int ppn = pageTable[vpn].ppn;
-		int paddr = (ppn << pageByteLength) + ((vaddr & mask));
-		if (paddr < 0 || paddr >= memory.length)
-			return 0;
-
-		int amount = Math.min(length, memory.length - paddr);
-		System.arraycopy(memory, paddr, data, offset, amount);
-
-		return amount;
+		int addrOffset = vaddr & offsetMask;
+		while(offset < data.length && vpn < pageTable.length && length > 0){
+			int nextVirtualAddress = (vpn + 1) * pageSize;
+			int ppn = pageTable[vpn].ppn;
+			int amount = Math.min(length, nextVirtualAddress - vaddr);
+			int paddr = (ppn << pageByteLength) + addrOffset;
+			if (paddr < 0 || paddr >= memory.length)
+				return 0;
+			System.arraycopy(memory, paddr, data, offset, amount);
+			vpn++;
+			vaddr = vpn * pageSize;
+			offset += amount;
+			length -= amount;
+			addrOffset = 0;
+			totalAmount += amount;
+		}
+		return totalAmount;
 	}
 
 	/**
@@ -217,22 +221,29 @@ public class UserProcess {
 
 		byte[] memory = Machine.processor().getMemory();
 
-		// for now, just assume that virtual addresses equal physical addresses
-		int pageByteLength = (int)(Math.log(pageSize) / Math.log(2));
-		int mask = 0x3FF;
-		int vpn = (vaddr - (vaddr & mask)) >> pageByteLength;
+		int totalAmount = 0;
+
+		int vpn = (vaddr & vpnMask) >> pageByteLength;
 		if(vpn >= pageTable.length){
 			return 0;
 		}
-		int ppn = pageTable[vpn].ppn;
-		int paddr = (ppn << pageByteLength) + ((vaddr & mask));
-		if (paddr < 0 || paddr >= memory.length)
-			return 0;
-
-		int amount = Math.min(length, memory.length - paddr);
-		System.arraycopy(data, offset, memory, paddr, amount);
-
-		return amount;
+		int addrOffset = vaddr & offsetMask;
+		while(offset < data.length && vpn < pageTable.length && length > 0){
+			int nextVirtualAddress = (vpn + 1) * pageSize;
+			int ppn = pageTable[vpn].ppn;
+			int amount = Math.min(length, nextVirtualAddress - vaddr);
+			int paddr = (ppn << pageByteLength) + addrOffset;
+			if (paddr < 0 || paddr >= memory.length)
+				return 0;
+			System.arraycopy(data, offset, memory, paddr, amount);
+			vpn++;
+			vaddr = vpn * pageSize;
+			offset += amount;
+			length -= amount;
+			addrOffset = 0;
+			totalAmount += amount;
+		}
+		return totalAmount;
 	}
 
 	/**
@@ -832,6 +843,12 @@ public class UserProcess {
 	private static final char dbgProcess = 'a';
 
 	private static Lock lock = new Lock();
+
+	private static final int vpnMask = (~0 ^ 0x3FF);
+
+	private static final int offsetMask = 0x3FF;
+
+	private static final int pageByteLength = 10;
 
 	protected int pid;
 
