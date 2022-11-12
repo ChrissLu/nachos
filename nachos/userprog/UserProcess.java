@@ -346,13 +346,12 @@ public class UserProcess {
 	protected boolean loadSections() {
 		lock.acquire();
 		if (numPages > UserKernel.freePhysicalPages.size()) {
+			lock.release();
 			coff.close();
 			Lib.debug(dbgProcess, "\tinsufficient physical memory");
 			return false;
 		}
-		lock.release();
 		pageTable = new TranslationEntry[numPages];
-		lock.acquire();
 		for(int i = 0; i < numPages; i++){
 			pageTable[i] = new TranslationEntry(i, UserKernel.freePhysicalPages.remove(), true, false, false,false);
 		}
