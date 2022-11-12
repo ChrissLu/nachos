@@ -5,7 +5,7 @@
 int
 main (int argc, char *argv[])
 {
-    char *file_name = argv[0];
+    char *file_name = argv[argc-1];
     int fd = creat(file_name);
     if(fd >= 0){
         if(fd != 2){

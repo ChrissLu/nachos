@@ -448,7 +448,9 @@ public class UserProcess {
 			child.parent = null;
 		}
 		if(parent!=null){
+			lock.acquire();
 			parent.childstatusMap.put(pid,status);
+			lock.release();
 			//parent.childList.remove(this); //this sentence could be deleted
 		}
 		
@@ -485,11 +487,12 @@ public class UserProcess {
 			args[i] = readVirtualMemoryString(Lib.bytesToInt(adr,0), 256);
 		}
 
-
 		if (!child.execute(fileName,args)) {
 			System.out.println ("could not find '" + fileName + "', aborting.");
-			Lib.assertTrue(false);
+			--processCounter;
+			return -1;
 		}
+
 
 		// System.out.print("children of pid "+ pid + " are ");
 		// for(UserProcess c:childList) if(c!=null) System.out.print(" "+c.pid);
@@ -519,19 +522,22 @@ public class UserProcess {
 				break;
 			}
 		}
-		if(child == this) return -1;
-		if(!childstatusMap.containsKey(processID)) return -1;
+		if(child == this)  return -1;
 
 		child.thread.join();
-		if(child.abnormal) return 0;
-
-		if(statusVaddr != 0x0){     // not NULL pointer
+		int re = 1;
+		lock.acquire();
+		if(!childstatusMap.containsKey(processID)) re = -1;
+		else if(child.abnormal) re = 0;
+		else if(statusVaddr != 0x0){     // not NULL pointer
 			byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
 			int w = writeVirtualMemory(statusVaddr,toWrite);
-			if(w==0) return -1; //invalid status pointer
+			if(w==0) re = -1; //invalid status pointer
+			childstatusMap.remove(processID);
 		}
-		childstatusMap.remove(processID);
-		return 1;
+		else childstatusMap.remove(processID); // NULL pointer
+		lock.release();
+		return re;
 
 	}
 

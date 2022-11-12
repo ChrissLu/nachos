@@ -10,7 +10,7 @@ main (int argc, char *argv[])
 {
     char *prog = "creat5.coff";
     int pid;
-    char *childargv[1] = {
+    char *childargv[] = {
 	"test.txt"};
 
     pid = exec (prog, 1, childargv);
