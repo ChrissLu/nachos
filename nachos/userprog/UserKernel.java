@@ -4,6 +4,8 @@ import nachos.machine.*;
 import nachos.threads.*;
 import nachos.userprog.*;
 
+import java.util.LinkedList;
+
 /**
  * A kernel that can support multiple user processes.
  */
@@ -13,6 +15,11 @@ public class UserKernel extends ThreadedKernel {
 	 */
 	public UserKernel() {
 		super();
+		//Allocate all the free physical pages
+		freePhysicalPages = new LinkedList<>();
+		for(int i = 0; i < Machine.processor().getNumPhysPages(); i++){
+			freePhysicalPages.add(i);
+		}
 	}
 
 	/**
@@ -124,4 +131,6 @@ public class UserKernel extends ThreadedKernel {
 
 	// dummy variables to make javac smarter
 	private static Coff dummy1 = null;
+
+	public static LinkedList<Integer> freePhysicalPages;
 }

@@ -6,6 +6,7 @@ import nachos.userprog.*;
 import nachos.vm.*;
 import java.util.*;
 import java.io.EOFException;
+import java.util.LinkedList;
 
 /**
  * Encapsulates the state of a user process that is not contained in its user
@@ -24,21 +25,28 @@ public class UserProcess {
 	 * Allocate a new process.
 	 */
 	public UserProcess() {
-		int numPhysPages = Machine.processor().getNumPhysPages();
-		pageTable = new TranslationEntry[numPhysPages];
-		for (int i = 0; i < numPhysPages; i++)
-			pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
+//		int numPhysPages = Machine.processor().getNumPhysPages();
+//		pageTable = new TranslationEntry[numPhysPages];
+//		for (int i = 0; i < numPhysPages; i++)
+//			pageTable[i] = new TranslationEntry(i, i, true, false, false, false);
 
 		// set stdin and stdout
 		openFileTable[0] = UserKernel.console.openForReading();
 		openFileTable[1] = UserKernel.console.openForWriting();
-		for(int i=0;;i++){
-			if (pidList.contains(i)) continue;
-			pid = i; 
-			pidList.add(i);
-			break;
-		}
+		// for(int i=1;;i++){
+		// 	if (pidList.contains(i)) continue;
+		// 	pid = i; 
+		// 	pidList.add(i);
+		// 	System.out.print("pidlist ");
+		// 	for(int j:pidList) System.out.print(j+ " ");
+		// 	System.out.println();
+		// 	break;
+		// }
+		pidCounter++;
+		pid = pidCounter;
+		processCounter++;
 		childList = new ArrayList<UserProcess>();
+		childstatusMap = new HashMap<Integer,Integer>();
 	}
 
 	/**
@@ -159,11 +167,20 @@ public class UserProcess {
 		byte[] memory = Machine.processor().getMemory();
 
 		// for now, just assume that virtual addresses equal physical addresses
-		if (vaddr < 0 || vaddr >= memory.length)
+		int pageByteLength = (int)(Math.log(pageSize) / Math.log(2));
+		int mask = 0x3FF;
+		int vpn = (vaddr - (vaddr & mask)) >> pageByteLength;
+
+		if(vpn >= pageTable.length){
+			return 0;
+		}
+		int ppn = pageTable[vpn].ppn;
+		int paddr = (ppn << pageByteLength) + ((vaddr & mask));
+		if (paddr < 0 || paddr >= memory.length)
 			return 0;
 
-		int amount = Math.min(length, memory.length - vaddr);
-		System.arraycopy(memory, vaddr, data, offset, amount);
+		int amount = Math.min(length, memory.length - paddr);
+		System.arraycopy(memory, paddr, data, offset, amount);
 
 		return amount;
 	}
@@ -201,11 +218,19 @@ public class UserProcess {
 		byte[] memory = Machine.processor().getMemory();
 
 		// for now, just assume that virtual addresses equal physical addresses
-		if (vaddr < 0 || vaddr >= memory.length)
+		int pageByteLength = (int)(Math.log(pageSize) / Math.log(2));
+		int mask = 0x3FF;
+		int vpn = (vaddr - (vaddr & mask)) >> pageByteLength;
+		if(vpn >= pageTable.length){
+			return 0;
+		}
+		int ppn = pageTable[vpn].ppn;
+		int paddr = (ppn << pageByteLength) + ((vaddr & mask));
+		if (paddr < 0 || paddr >= memory.length)
 			return 0;
 
-		int amount = Math.min(length, memory.length - vaddr);
-		System.arraycopy(data, offset, memory, vaddr, amount);
+		int amount = Math.min(length, memory.length - paddr);
+		System.arraycopy(data, offset, memory, paddr, amount);
 
 		return amount;
 	}
@@ -305,12 +330,17 @@ public class UserProcess {
 	 * @return <tt>true</tt> if the sections were successfully loaded.
 	 */
 	protected boolean loadSections() {
-		if (numPages > Machine.processor().getNumPhysPages()) {
+		if (numPages > UserKernel.freePhysicalPages.size()) {
 			coff.close();
 			Lib.debug(dbgProcess, "\tinsufficient physical memory");
 			return false;
 		}
+		pageTable = new TranslationEntry[numPages];
 
+		for(int i = 0; i < numPages; i++){
+			pageTable[i] = new TranslationEntry(i, UserKernel.freePhysicalPages.remove(), true, false, false,false);
+		}
+		int n = 0;
 		// load sections
 		for (int s = 0; s < coff.getNumSections(); s++) {
 			CoffSection section = coff.getSection(s);
@@ -318,12 +348,16 @@ public class UserProcess {
 			Lib.debug(dbgProcess, "\tinitializing " + section.getName()
 					+ " section (" + section.getLength() + " pages)");
 
+			lock.acquire();
 			for (int i = 0; i < section.getLength(); i++) {
 				int vpn = section.getFirstVPN() + i;
+				pageTable[vpn].readOnly = section.isReadOnly();
 
-				// for now, just assume virtual addresses=physical addresses
-				section.loadPage(i, vpn);
+				// Get the ppn from pageTable
+				section.loadPage(i, pageTable[vpn].ppn);
 			}
+			lock.release();
+
 		}
 
 		return true;
@@ -333,6 +367,11 @@ public class UserProcess {
 	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
+		lock.acquire();
+		for(int i = 0; i < pageTable.length; i++){
+			UserKernel.freePhysicalPages.add(pageTable[i].ppn);
+		}
+		lock.release();
 	}
 
 	/**
@@ -363,7 +402,7 @@ public class UserProcess {
 	 */
 	private int handleHalt() {
 		if(KThread.currentThread().getName() == Machine.getShellProgramName()){        //is the root process
-		Machine.halt();
+			Machine.halt();
 		}else{
 			return -1;
 		}
@@ -382,6 +421,7 @@ public class UserProcess {
 
 		Lib.debug(dbgProcess, "UserProcess.handleExit (" + status + ")");
 
+		System.out.println("exiting " + pid);
 
 		for (OpenFile f:openFileTable){
 			if(f!=null) f.close();
@@ -390,16 +430,20 @@ public class UserProcess {
 			child.parent = null;
 		}
 		if(parent!=null){
-			parent.childstatus = status; //what if there are multiple children?
-			parent.childList.remove(this);
+			parent.childstatusMap.put(pid,status);
+			parent.childList.remove(this); //this sentence could be deleted
 		}
-		pidList.remove(pid);
-
-		//how to clean memory for this process???????????  may related to multi-programming
-		System.out.println(KThread.currentThread().getName());
-		System.out.println(Machine.getShellProgramName());
+		// System.out.println("############" + pid);
+		// System.out.println(pidList.size());
 		
-		if(true){         //how to determine this is the last process?
+		//pidList.remove(Integer.valueOf(pid));
+
+		unloadSections();  // free up memory 
+		// System.out.println(KThread.currentThread().getName());
+		// System.out.println(Machine.getShellProgramName());
+
+		
+		if(--processCounter == 0){         //the last process
 			Kernel.kernel.terminate();
 		}else{
 			KThread.currentThread().finish();
@@ -434,7 +478,9 @@ public class UserProcess {
 			System.out.println ("could not find '" + fileName + "', aborting.");
 			Lib.assertTrue(false);
 		}
-
+		System.out.print("children of pid "+ pid + " are ");
+		for(UserProcess c:childList) if(c!=null) System.out.print(" "+c.pid);
+		System.out.println();
 		return childPID;
 	}
 
@@ -452,22 +498,31 @@ public class UserProcess {
 	 * Handle the join() system call.
 	 */
 	private int handleJoin(int processID, int statusVaddr) {
+
 		UserProcess child = this;
-		//boolean ischild = false;
 		for(UserProcess c:childList){
+			System.out.print(c.pid + " ");
+			System.out.println();
 			if (c.pid == processID) {
 				child = c;
-				//ischild = true;
 				break;
 			}
 		}
-		if(child == this) return -1;
-		//Lib.assertTrue(ischild,"the input PID does not belong to a child process");
+		if(child == this) {    //process id not included in the childList
+			if(childstatusMap.containsKey(processID)){  //child finshed before join
+				byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
+				writeVirtualMemory(statusVaddr,toWrite);
+				childstatusMap.remove(processID);
+				return 1;
+			}
+			return -1;
+		}
 
 		try{
 			child.thread.join();
-			byte[] toWrite = Lib.bytesFromInt(childstatus);
+			byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
 			writeVirtualMemory(statusVaddr,toWrite);
+			childstatusMap.remove(processID);
 			return 1;
 		}
 		catch(Exception e){ //should I use try catch?
@@ -744,6 +799,7 @@ public class UserProcess {
 			break;
 
 		default:
+			handleExit(0);
 			Lib.debug(dbgProcess, "Unexpected exception: "
 					+ Processor.exceptionNames[cause]);
 			Lib.assertNotReached("Unexpected exception");
@@ -775,6 +831,8 @@ public class UserProcess {
 
 	private static final char dbgProcess = 'a';
 
+	private static Lock lock = new Lock();
+
 	protected int pid;
 
 	private static ArrayList<Integer> pidList = new ArrayList<Integer>();
@@ -784,4 +842,10 @@ public class UserProcess {
 	protected ArrayList<UserProcess> childList;
 
 	private int childstatus;
+
+	private Map<Integer,Integer> childstatusMap;
+
+	private static int pidCounter = 0; //to simply assign pid (could be improved by pidlist or something)
+
+	private static int processCounter = 0; //to indicate the last process
 }

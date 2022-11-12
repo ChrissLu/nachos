@@ -38,5 +38,5 @@ main (int argc, char *argv[])
     }
 
     // the return value from main is used as the status to exit
-    return 0;
+    return 1;
 }
