@@ -46,7 +46,7 @@ main (int argc, char *argv[])
     if (r < 0) {
 	printf ("exec returned an error: %d\n", r);
     } else {
-	printf ("exec succeded, child pid %d\n", r); 
+	printf ("exec succeed, child pid %d\n", r); 
     }
 
     exit (r);
