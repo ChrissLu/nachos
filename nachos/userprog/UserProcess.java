@@ -4,7 +4,7 @@ import nachos.machine.*;
 import nachos.threads.*;
 import nachos.userprog.*;
 import nachos.vm.*;
-
+import java.util.*;
 import java.io.EOFException;
 import java.util.LinkedList;
 
@@ -33,6 +33,20 @@ public class UserProcess {
 		// set stdin and stdout
 		openFileTable[0] = UserKernel.console.openForReading();
 		openFileTable[1] = UserKernel.console.openForWriting();
+		// for(int i=1;;i++){
+		// 	if (pidList.contains(i)) continue;
+		// 	pid = i; 
+		// 	pidList.add(i);
+		// 	System.out.print("pidlist ");
+		// 	for(int j:pidList) System.out.print(j+ " ");
+		// 	System.out.println();
+		// 	break;
+		// }
+		pidCounter++;
+		pid = pidCounter;
+		processCounter++;
+		childList = new ArrayList<UserProcess>();
+		childstatusMap = new HashMap<Integer,Integer>();
 	}
 
 	/**
@@ -387,9 +401,11 @@ public class UserProcess {
 	 * Handle the halt() system call.
 	 */
 	private int handleHalt() {
-
-		Machine.halt();
-
+		if(KThread.currentThread().getName() == Machine.getShellProgramName()){        //is the root process
+			Machine.halt();
+		}else{
+			return -1;
+		}
 		Lib.assertNotReached("Machine.halt() did not halt machine!");
 		return 0;
 	}
@@ -404,11 +420,122 @@ public class UserProcess {
 		// can grade your implementation.
 
 		Lib.debug(dbgProcess, "UserProcess.handleExit (" + status + ")");
-		// for now, unconditionally terminate with just one process
-		Kernel.kernel.terminate();
+
+		System.out.println("exiting " + pid);
+
+		for (OpenFile f:openFileTable){
+			if(f!=null) f.close();
+		}
+		for(UserProcess child:childList){
+			child.parent = null;
+		}
+		if(parent!=null){
+			parent.childstatusMap.put(pid,status);
+			parent.childList.remove(this); //this sentence could be deleted
+		}
+		// System.out.println("############" + pid);
+		// System.out.println(pidList.size());
+		
+		//pidList.remove(Integer.valueOf(pid));
+
+		unloadSections();  // free up memory 
+		// System.out.println(KThread.currentThread().getName());
+		// System.out.println(Machine.getShellProgramName());
+
+		
+		if(--processCounter == 0){         //the last process
+			Kernel.kernel.terminate();
+		}else{
+			KThread.currentThread().finish();
+		}		
+		
+		return 0;
+	}
+
+
+
+	
+	/**
+	 * Handle the exec() system call.
+	 */
+	private int handleExec(int strVaddr,int argc,int argv) {
+		UserProcess child = newUserProcess();
+		int childPID = child.pid;
+		child.parent = this;
+		this.childList.add(child);
+		
+		String fileName = readVirtualMemoryString(strVaddr, 256);
+		String[] args = new String[argc];
+		for(int i=0;i<argc;i++){
+			byte[] adr = new byte[4];
+			readVirtualMemory(argv+4*i,adr);
+			args[i] = readVirtualMemoryString(Lib.bytesToInt(adr,0), 256);
+		}
+
+		//System.out.println(args[1]);
+
+		if (!child.execute(fileName,args)) {
+			System.out.println ("could not find '" + fileName + "', aborting.");
+			Lib.assertTrue(false);
+		}
+		System.out.print("children of pid "+ pid + " are ");
+		for(UserProcess c:childList) if(c!=null) System.out.print(" "+c.pid);
+		System.out.println();
+		return childPID;
+	}
+
+	// private int bytesToInt(byte[] b) {
+	// 	int value;	
+	// 	value = (int) ((b[0]&0xFF) 
+	// 				| ((b[1]<<8) & 0xFF00)
+	// 				| ((b[2]<<16)& 0xFF0000) 
+	// 				| ((b[3]<<24) & 0xFF000000));
+	// 	return value;
+	// }
+
+
+	/**
+	 * Handle the join() system call.
+	 */
+	private int handleJoin(int processID, int statusVaddr) {
+
+		UserProcess child = this;
+		for(UserProcess c:childList){
+			System.out.print(c.pid + " ");
+			System.out.println();
+			if (c.pid == processID) {
+				child = c;
+				break;
+			}
+		}
+		if(child == this) {    //process id not included in the childList
+			if(childstatusMap.containsKey(processID)){  //child finshed before join
+				byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
+				writeVirtualMemory(statusVaddr,toWrite);
+				childstatusMap.remove(processID);
+				return 1;
+			}
+			return -1;
+		}
+
+		try{
+			child.thread.join();
+			byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
+			writeVirtualMemory(statusVaddr,toWrite);
+			childstatusMap.remove(processID);
+			return 1;
+		}
+		catch(Exception e){ //should I use try catch?
+			
+			child.thread.finish(); //???
+		}
+
 
 		return 0;
 	}
+
+
+
 
 	private int getNextFreeFileDescripter(){
 		for(int i=0;i<openFileTable.length;++i){
@@ -627,6 +754,10 @@ public class UserProcess {
 			return handleHalt();
 		case syscallExit:
 			return handleExit(a0);
+		case syscallExec:
+			return handleExec(a0, a1, a2);
+		case syscallJoin:
+			return handleJoin(a0, a1);
 		case syscallCreate:
 			return handleCreate(a0);
 		case syscallOpen:
@@ -668,6 +799,7 @@ public class UserProcess {
 			break;
 
 		default:
+			handleExit(0);
 			Lib.debug(dbgProcess, "Unexpected exception: "
 					+ Processor.exceptionNames[cause]);
 			Lib.assertNotReached("Unexpected exception");
@@ -700,4 +832,20 @@ public class UserProcess {
 	private static final char dbgProcess = 'a';
 
 	private static Lock lock = new Lock();
+
+	protected int pid;
+
+	private static ArrayList<Integer> pidList = new ArrayList<Integer>();
+
+	protected UserProcess parent;
+
+	protected ArrayList<UserProcess> childList;
+
+	private int childstatus;
+
+	private Map<Integer,Integer> childstatusMap;
+
+	private static int pidCounter = 0; //to simply assign pid (could be improved by pidlist or something)
+
+	private static int processCounter = 0; //to indicate the last process
 }
