@@ -583,6 +583,18 @@ public class UserProcess {
 		return -1;
 	}
 
+	private boolean isPipeFile(String fileName){
+		String prefix = "/pipe/";
+		if(fileName.length() < prefix.length() || !prefix.equals(fileName.substring(0, prefix.length()))){
+			return false;
+		}
+		return true;
+	}
+
+	private String getPipeName(String fileName){
+		return fileName.substring(6);
+	}
+
 	private int handleCreate(int strVaddr){
 		int fd = getNextFreeFileDescripter();
 		if(fd == -1){
@@ -595,12 +607,28 @@ public class UserProcess {
 			return -1;
 		}
 		//System.out.println("filename: " + fileName);
-		OpenFile f = ThreadedKernel.fileSystem.open(fileName, true);
-		if(f == null){
-			// file could not be opened
-			return -1;
+		boolean isPipe = isPipeFile(fileName);
+		if(isPipe){
+			String pipeName = getPipeName(fileName);
+			System.out.println("pipeName: " + pipeName);
+			PipeFile f = null;
+			pipeFilesLock.acquire();
+			if(pipeFiles.containsKey(pipeName)){
+				pipeFilesLock.release();
+				return -1;
+			} else{
+				f = new PipeFile(pipeName);
+			}
+			pipeFilesLock.release();
+			openFileTable[fd] = f;
+		} else{
+			OpenFile f = ThreadedKernel.fileSystem.open(fileName, true);
+			if(f == null){
+				// file could not be opened
+				return -1;
+			}
+			openFileTable[fd] = f;
 		}
-		openFileTable[fd] = f;
 		return fd;
 	}
 
@@ -615,12 +643,27 @@ public class UserProcess {
 			// the length of filename exceeds 256 chars
 			return -1;
 		}
-		OpenFile f = ThreadedKernel.fileSystem.open(fileName, false);
-		if(f == null){
-			// file could not be opened
-			return -1;
+		boolean isPipe = isPipeFile(fileName);
+		if(isPipe){
+			String pipeName = getPipeName(fileName);
+			PipeFile f = null;
+			pipeFilesLock.acquire();
+			if(pipeFiles.containsKey(pipeName)){
+				f = pipeFiles.get(pipeName).open();
+			} else{
+				pipeFilesLock.release();
+				return -1;
+			}
+			pipeFilesLock.release();
+			openFileTable[fd] = f;
+		} else{
+			OpenFile f = ThreadedKernel.fileSystem.open(fileName, false);
+			if(f == null){
+				// file could not be opened
+				return -1;
+			}
+			openFileTable[fd] = f;
 		}
-		openFileTable[fd] = f;
 		return fd;
 	}
 
@@ -638,6 +681,23 @@ public class UserProcess {
 
 		OpenFile f = openFileTable[fd];
 		byte[] buf = new byte[pageSize];
+
+		if(f instanceof PipeFile){
+			int readCnt = f.read(buf, 0, Math.min(buf.length, count));
+			if(readCnt == -1){
+				return -1;
+			}
+			if(readCnt == 0){
+				return 0;
+			}
+			int nw = writeVirtualMemory(bufVaddr, buf, 0, readCnt);
+			if(nw != readCnt){
+				// memory overflow
+				return -1;
+			}
+			return readCnt;
+		}
+
 		int totRead = 0;
 		int startPos = 0;
 		while(count > 0){
@@ -901,4 +961,117 @@ public class UserProcess {
 	private static Lock processCounterLock = new Lock();
 
 	private Lock mutex;
+
+	private static class PipeFile extends OpenFile {
+		PipeFile(String pipeName) {
+			name = pipeName;
+			ringBuffer = new byte[pageSize];
+			size = 0;
+			beginIdx = 0;
+			endIdx = 0;
+			refCount = 1;
+			refCountLock = new Lock();
+			mutex = new Lock();
+			empty = new Condition(mutex);
+			full = new Condition(mutex);
+			pipeFiles.put(name, this);
+			//System.out.println("create pipe " + name);
+		}
+
+		@Override
+		public int read(byte[] buf, int offset, int length) {
+			if(length <= 0)
+				return 0;
+			//System.out.println("Begin read");
+			mutex.acquire();
+			while(size == 0){
+				empty.sleep();
+			}
+			if(size < length){
+				length = size;
+			}
+			for(int i=0;i<length;++i){
+				buf[offset+i] = ringBuffer[beginIdx];
+				beginIdx = (beginIdx+1) % ringBuffer.length;
+				--size;
+			}
+			full.wakeAll();
+			mutex.release();
+			//System.out.println("read " + length);
+			//System.out.println("End read");
+			return length;
+		}
+
+		@Override
+		public int write(byte[] buf, int offset, int length) {
+			if(length <= 0)
+				return 0;
+			int totWrite = 0;
+			//System.out.println("Begin write");
+			while(totWrite < length){
+				int needWrite = 0;
+				mutex.acquire();
+				while(size == ringBuffer.length){
+					full.sleep();
+				}
+				needWrite = length - totWrite;
+				if(needWrite > ringBuffer.length-size){
+					needWrite = ringBuffer.length-size;
+				}
+				for(int i=0;i<needWrite;++i){
+					ringBuffer[endIdx] = buf[offset+totWrite+i];
+					endIdx = (endIdx + 1) % ringBuffer.length;
+					++size;
+				}
+				//System.out.println("write " + needWrite);
+				empty.wakeAll();
+				mutex.release();
+				totWrite += needWrite;
+			}
+			//System.out.println("End write");
+			return totWrite;
+		}
+
+		@Override
+		public void close() {
+			refCountLock.acquire();
+			--refCount;
+			if(refCount == 0){
+				pipeFilesLock.acquire();
+				pipeFiles.remove(name);
+				//System.out.println("remove pipe " + name);
+				pipeFilesLock.release();
+			}
+			refCountLock.release();
+		}
+
+		public PipeFile open() {
+			refCountLock.acquire();
+			++refCount;
+			refCountLock.release();
+			return this;
+		}
+
+		private String name;
+		private int refCount;
+
+		private Lock refCountLock;
+		private int size;
+
+		private byte[] ringBuffer;
+
+		private int beginIdx;
+
+		private int endIdx;
+
+		private Lock mutex;
+
+		private Condition empty;
+
+		private Condition full;
+	}
+
+	private static Map<String, PipeFile> pipeFiles = new HashMap<>();;
+
+	private static Lock pipeFilesLock = new Lock();
 }
