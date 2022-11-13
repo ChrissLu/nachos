@@ -25,6 +25,7 @@ public class UserProcess {
 	 * Allocate a new process.
 	 */
 	public UserProcess() {
+		mutex = new Lock();
 //		int numPhysPages = Machine.processor().getNumPhysPages();
 //		pageTable = new TranslationEntry[numPhysPages];
 //		for (int i = 0; i < numPhysPages; i++)
@@ -42,11 +43,10 @@ public class UserProcess {
 		// 	System.out.println();
 		// 	break;
 		// }
-		lock.acquire();
+		pidCounterLock.acquire();
 		pidCounter++;
 		pid = pidCounter;
-		processCounter++;
-		lock.release();
+		pidCounterLock.release();
 		childList = new ArrayList<UserProcess>();
 		childstatusMap = new HashMap<Integer,Integer>();
 		abnormal = false;
@@ -90,6 +90,10 @@ public class UserProcess {
 
 		thread = new UThread(this);
 		thread.setName(name).fork();
+
+		processCounterLock.acquire();
+		processCounter++;
+		processCounterLock.release();
 
 		return true;
 	}
@@ -344,9 +348,9 @@ public class UserProcess {
 	 * @return <tt>true</tt> if the sections were successfully loaded.
 	 */
 	protected boolean loadSections() {
-		lock.acquire();
+		pageLock.acquire();
 		if (numPages > UserKernel.freePhysicalPages.size()) {
-			lock.release();
+			pageLock.release();
 			coff.close();
 			Lib.debug(dbgProcess, "\tinsufficient physical memory");
 			return false;
@@ -355,7 +359,7 @@ public class UserProcess {
 		for(int i = 0; i < numPages; i++){
 			pageTable[i] = new TranslationEntry(i, UserKernel.freePhysicalPages.remove(), true, false, false,false);
 		}
-		lock.release();
+		pageLock.release();
 		int n = 0;
 		// load sections
 		for (int s = 0; s < coff.getNumSections(); s++) {
@@ -382,12 +386,12 @@ public class UserProcess {
 	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
-		lock.acquire();
+		pageLock.acquire();
 		if(pageTable!=null)
 		for(int i = 0; i < pageTable.length; i++){
 			UserKernel.freePhysicalPages.add(pageTable[i].ppn);
 		}
-		lock.release();
+		pageLock.release();
 	}
 
 	/**
@@ -417,7 +421,7 @@ public class UserProcess {
 	 * Handle the halt() system call.
 	 */
 	private int handleHalt() {
-		if(KThread.currentThread().getName() == Machine.getShellProgramName()){        //is the root process
+		if(pid == 1){        //is the root process
 			Machine.halt();
 		}else{
 			System.out.println("halt not called by root");
@@ -443,13 +447,13 @@ public class UserProcess {
 		for (OpenFile f:openFileTable){
 			if(f!=null) f.close();
 		}
-		for(UserProcess child:childList){
-			child.parent = null;
-		}
+		// for(UserProcess child:childList){
+		// 	child.parent = null;
+		// }
 		if(parent!=null){
-			lock.acquire();
+			parent.mutex.acquire();
 			parent.childstatusMap.put(pid,status);
-			lock.release();
+			parent.mutex.release();
 			//parent.childList.remove(this); //this sentence could be deleted
 		}
 		
@@ -457,9 +461,13 @@ public class UserProcess {
 
 		unloadSections();  // free up memory 
 
-		if(--processCounter == 0){         //the last process
+		processCounterLock.acquire();
+		--processCounter;
+		if(processCounter == 0){         //the last process
+			processCounterLock.release();
 			Kernel.kernel.terminate();
 		}else{
+			processCounterLock.release();
 			KThread.currentThread().finish();
 		}		
 		
@@ -488,7 +496,6 @@ public class UserProcess {
 
 		if (!child.execute(fileName,args)) {
 			System.out.println ("could not find '" + fileName + "', aborting.");
-			--processCounter;
 			return -1;
 		}
 
@@ -525,19 +532,29 @@ public class UserProcess {
 
 		child.thread.join();
 		int re = 1;
-		lock.acquire();
-		if(!childstatusMap.containsKey(processID)) re = -1;
-		else if(child.abnormal) re = 0;
-		else if(statusVaddr != 0x0){     // not NULL pointer
-			byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
-			int w = writeVirtualMemory(statusVaddr,toWrite);
-			if(w==0) re = -1; //invalid status pointer
-			childstatusMap.remove(processID);
-		}
-		else childstatusMap.remove(processID); // NULL pointer
-		lock.release();
-		return re;
 
+		mutex.acquire();
+		if(!childstatusMap.containsKey(processID)) re = -1;
+		else{
+			child.mutex.acquire();
+			if(child.abnormal){
+				re = 0;
+				child.mutex.release();
+			} 
+			else {
+				child.mutex.release();
+				if(statusVaddr != 0x0){     // not NULL pointer
+					byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
+					int w = writeVirtualMemory(statusVaddr,toWrite);
+					if(w==0) re = -1; //invalid status pointer
+					childstatusMap.remove(processID);
+				}
+				else childstatusMap.remove(processID); // NULL pointer
+			}
+		} 
+		mutex.release();
+
+		return re;
 	}
 
 
@@ -805,7 +822,9 @@ public class UserProcess {
 			break;
 
 		default:
+			mutex.acquire();
 			abnormal = true;
+			mutex.release();
 			System.out.println("unexpected exception, exit");
 			handleExit(0);
 
@@ -838,7 +857,7 @@ public class UserProcess {
 
 	private static final char dbgProcess = 'a';
 
-	private static Lock lock = new Lock();
+	private static Lock pageLock = new Lock();
 
 	private static final int vpnMask = (~0 ^ 0x3FF);
 
@@ -860,5 +879,11 @@ public class UserProcess {
 
 	private static int pidCounter = 0; //to simply assign pid (could be improved by pidlist or something)
 
+	private static Lock pidCounterLock = new Lock();
+
 	private static int processCounter = 0; //to indicate the last process
+
+	private static Lock processCounterLock = new Lock();
+
+	private Lock mutex;
 }
