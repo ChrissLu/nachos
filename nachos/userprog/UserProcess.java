@@ -166,8 +166,12 @@ public class UserProcess {
 	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
 		Lib.assertTrue(offset >= 0 && length >= 0
 				&& offset + length <= data.length);
-
+		
 		byte[] memory = Machine.processor().getMemory();
+
+		if (vaddr < 0 || vaddr >= memory.length)
+			return 0;
+
 		int totalAmount = 0;
 		int vpn = (vaddr & vpnMask) >> pageByteLength;
 		if(vpn >= pageTable.length){
@@ -223,6 +227,9 @@ public class UserProcess {
 				&& offset + length <= data.length);
 
 		byte[] memory = Machine.processor().getMemory();
+
+		if (vaddr < 0 || vaddr >= memory.length)
+			return 0;
 
 		int totalAmount = 0;
 
@@ -473,16 +480,24 @@ public class UserProcess {
 	 * Handle the exec() system call.
 	 */
 	private int handleExec(int strVaddr,int argc,int argv) {
+		if(argc < 0)
+			return -1;
+
+		String fileName = readVirtualMemoryString(strVaddr, 256);
+		if(fileName == null)
+			return -1;
+		
 		UserProcess child = newUserProcess();
 		int childPID = child.pid;
 		child.parent = this;
 		this.childList.add(child);
-		
-		String fileName = readVirtualMemoryString(strVaddr, 256);
+
 		String[] args = new String[argc];
 		for(int i=0;i<argc;i++){
 			byte[] adr = new byte[4];
-			readVirtualMemory(argv+4*i,adr);
+			int nr = readVirtualMemory(argv+4*i,adr);
+			if(nr == 0)
+				return -1;
 			args[i] = readVirtualMemoryString(Lib.bytesToInt(adr,0), 256);
 		}
 
