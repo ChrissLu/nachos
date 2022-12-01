@@ -932,13 +932,13 @@ public class UserProcess {
 
 	private static final char dbgProcess = 'a';
 
-	private static Lock pageLock = new Lock();
+	protected static Lock pageLock = new Lock();
 
-	private static final int vpnMask = (~0 ^ 0x3FF);
+	protected static final int vpnMask = (~0 ^ 0x3FF);
 
-	private static final int offsetMask = 0x3FF;
+	protected static final int offsetMask = 0x3FF;
 
-	private static final int pageByteLength = 10;
+	protected static final int pageByteLength = 10;
 
 	protected int pid;
 
@@ -1071,7 +1071,7 @@ public class UserProcess {
 		private Condition full;
 	}
 
-	private static Map<String, PipeFile> pipeFiles = new HashMap<>();;
+	private static Map<String, PipeFile> pipeFiles = new HashMap<>();
 
 	private static Lock pipeFilesLock = new Lock();
 }
