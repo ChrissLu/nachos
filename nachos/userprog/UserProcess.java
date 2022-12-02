@@ -550,8 +550,12 @@ public class UserProcess {
 		int re = 1;
 
 		mutex.acquire();
-		if(!childstatusMap.containsKey(processID)) re = -1;
+		if(!childstatusMap.containsKey(processID)) {
+			re = -1;
+			mutex.release();
+		}
 		else{
+			mutex.release();
 			child.mutex.acquire();
 			if(child.abnormal){
 				re = 0;
@@ -560,15 +564,23 @@ public class UserProcess {
 			else {
 				child.mutex.release();
 				if(statusVaddr != 0x0){     // not NULL pointer
+					mutex.acquire();
 					byte[] toWrite = Lib.bytesFromInt(childstatusMap.get(processID));
+					mutex.release();
+
 					int w = writeVirtualMemory(statusVaddr,toWrite);
 					if(w==0) re = -1; //invalid status pointer
+					mutex.acquire();
 					childstatusMap.remove(processID);
+					mutex.release();
 				}
-				else childstatusMap.remove(processID); // NULL pointer
+				else {
+					mutex.acquire();
+					childstatusMap.remove(processID); // NULL pointer
+					mutex.release();
+				}
 			}
-		} 
-		mutex.release();
+		}
 
 		return re;
 	}
