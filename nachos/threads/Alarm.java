@@ -109,7 +109,7 @@ public class Alarm {
 		}
 
 		long wakeTime = threadMap.get(thread);
-		sleepingThreads.get(wakeTime).remove(wakeTime);
+		sleepingThreads.get(wakeTime).remove(thread);
 		threadMap.remove(thread);
 		thread.ready();
 
