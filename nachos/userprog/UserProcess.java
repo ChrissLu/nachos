@@ -399,6 +399,7 @@ public class UserProcess {
 			UserKernel.freePhysicalPages.add(pageTable[i].ppn);
 		}
 		pageLock.release();
+		coff.close();
 	}
 
 	/**

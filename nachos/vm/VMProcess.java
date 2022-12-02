@@ -66,6 +66,7 @@ public class VMProcess extends UserProcess {
 			}
 		}
 		mutex.release();
+		coff.close();
 	}
 
 	private void handlePageFault(int vpn, boolean pin){
@@ -332,7 +333,7 @@ public class VMProcess extends UserProcess {
 		private Lock mutex;
 	}
 
-	private static Replacer replacer;
+	private static Replacer replacer = new Replacer();
 
-	private static SwapFileManager swapFile;
+	private static SwapFileManager swapFile = new SwapFileManager();
 }
