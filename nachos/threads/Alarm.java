@@ -7,6 +7,8 @@ import java.util.Iterator;
 import java.util.TreeMap;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
+import java.util.LinkedList;
 
 /**
  * Uses the hardware timer to provide preemption, and to allow threads to sleep
@@ -37,15 +39,19 @@ public class Alarm {
 	public void timerInterrupt() {
 		boolean intStatus = Machine.interrupt().disable();
 		
-		Iterator<Map.Entry<Long, KThread>> it = sleepingThreads.entrySet().iterator();
-		Map.Entry<Long, KThread> entry = null;
+		Iterator<Map.Entry<Long, LinkedList<KThread>>> it = sleepingThreads.entrySet().iterator();
+		Map.Entry<Long, LinkedList<KThread>> entry = null;
 		while (it.hasNext()) {
 			entry = it.next();
 			if(entry.getKey() > Machine.timer().getTime()) {
                 break;
             }
-			threadMap.remove(entry.getValue());
-			entry.getValue().ready();
+
+			LinkedList<KThread> l = entry.getValue();
+			for (KThread t : l) {
+				threadMap.remove(t);
+				t.ready();
+			}
 			it.remove();
 		}
 		Machine.interrupt().restore(intStatus);
@@ -72,7 +78,14 @@ public class Alarm {
 		long wakeTime = Machine.timer().getTime() + x;
 		boolean intStatus = Machine.interrupt().disable();
 		KThread currentThread = KThread.currentThread();
-		sleepingThreads.put(wakeTime, currentThread);
+
+		LinkedList<KThread> l = sleepingThreads.get(wakeTime);
+		if(l==null){
+			l = new LinkedList();
+		}
+		l.add(currentThread);
+
+		sleepingThreads.put(wakeTime, l);
 		threadMap.put(currentThread, wakeTime);
 		KThread.sleep();
 		Machine.interrupt().restore(intStatus);
@@ -96,7 +109,7 @@ public class Alarm {
 		}
 
 		long wakeTime = threadMap.get(thread);
-		sleepingThreads.remove(wakeTime);
+		sleepingThreads.get(wakeTime).remove(wakeTime);
 		threadMap.remove(thread);
 		thread.ready();
 
@@ -104,7 +117,7 @@ public class Alarm {
 		return true;
 	}
 
-	private Map<Long, KThread> sleepingThreads = new TreeMap<Long, KThread>();
+	private TreeMap<Long, LinkedList<KThread>> sleepingThreads = new TreeMap();
 	private Map<KThread, Long> threadMap = new HashMap<KThread, Long>();
 
 	// Add Alarm testing code to the Alarm class
