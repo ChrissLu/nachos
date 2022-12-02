@@ -132,7 +132,7 @@ public class VMProcess extends UserProcess {
 		}
 		mutex.release();
 
-		if(pin)
+		if(!pin)
 			replacer.add(pageId);
 	}
 
@@ -182,7 +182,7 @@ public class VMProcess extends UserProcess {
 
 		byte[] memory = Machine.processor().getMemory();
 
-		if (vaddr < 0 || vaddr >= memory.length)
+		if (vaddr < 0)
 			return 0;
 
 		int totalAmount = 0;
@@ -220,7 +220,7 @@ public class VMProcess extends UserProcess {
 
 		byte[] memory = Machine.processor().getMemory();
 
-		if (vaddr < 0 || vaddr >= memory.length)
+		if (vaddr < 0)
 			return 0;
 
 		int totalAmount = 0;
@@ -263,6 +263,16 @@ public class VMProcess extends UserProcess {
 		PageId(VMProcess p, TranslationEntry e){
 			process = p;
 			pte = e;
+		}
+		
+		@Override
+		public int hashCode() {
+			return process.pid*256 + pte.vpn;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			return this.process==((PageId)obj).process && this.pte==((PageId)obj).pte;
 		}
 
 		public VMProcess process;
