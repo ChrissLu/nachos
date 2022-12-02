@@ -35,17 +35,15 @@ public class VMProcess extends UserProcess {
 	/**
 	 * Initializes page tables for this process so that the executable can be
 	 * demand-paged.
-	 * 
+	 *
 	 * @return <tt>true</tt> if successful.
 	 */
 	protected boolean loadSections() {
 		pageTable = new TranslationEntry[numPages];
-		pageLock.acquire();
 		for(int i = 0; i < numPages; i++){
-			int ppn = VMKernel.freePhysicalPages.remove();
-			pageTable[i] = new TranslationEntry(i, ppn, false, false, false,false);
+			// do not allocate physical memory when init, just use -1 as ppn
+			pageTable[i] = new TranslationEntry(i, -1, false, false, false,false);
 		}
-		pageLock.release();
 		return true;
 	}
 
@@ -53,78 +51,128 @@ public class VMProcess extends UserProcess {
 	 * Release any resources allocated by <tt>loadSections()</tt>.
 	 */
 	protected void unloadSections() {
-		pageLock.acquire();
+		mutex.acquire();
 		for(int i=0; i < numPages; ++i){
 			if(pageTable[i].valid){
 				// it is in the main memory
+				pageLock.acquire();
 				VMKernel.freePhysicalPages.add(pageTable[i].ppn);
+				pageLock.release();
+
+				replacer.remove(new PageId(this, pageTable[i]));
 			} else{
 				// maybe in the swap file
-				Lib.assertTrue(pageTable[i].ppn>=0);
-				VMKernel.freePhysicalPages.add(pageTable[i].ppn);
+				swapFile.clear(new PageId(this, pageTable[i]));
 			}
 		}
-		pageLock.release();
+		mutex.release();
 	}
 
-	private void handlePageFault(int vpn){
+	private void handlePageFault(int vpn, boolean pin){
+		PageId pageId = new PageId(this, pageTable[vpn]);
+		byte[] memory = Machine.processor().getMemory();
+
+		int ppn = -1;
+
+		pageLock.acquire();
+		if(UserKernel.freePhysicalPages.size() == 0){
+			// all the main memory pages are occupied, we need to evict one page
+			pageLock.release();
+			PageId evictPageId = replacer.evict();
+
+			evictPageId.process.mutex.acquire();
+			if(evictPageId.pte.dirty){
+				swapFile.write(evictPageId);
+			}
+			evictPageId.pte.valid = false;
+			ppn = evictPageId.pte.ppn;
+			evictPageId.process.mutex.release();
+		}else {
+			ppn = UserKernel.freePhysicalPages.remove();
+			pageLock.release();
+		}
+
+		int paddr = ppn * pageSize;
+
+		mutex.acquire();
+		pageTable[vpn].valid = true;
+		pageTable[vpn].ppn = ppn;
+		pageTable[vpn].dirty = false;
+		pageTable[vpn].used = true;
+
 		if(vpn >= numPages-stackPages-1){
 			// the stack or argument page
-			// 1. zero fill at the first page fault
-			// 2. load from swap file if modified
-
-			byte[] memory = Machine.processor().getMemory();
-			int startIndex = pageTable[vpn].ppn * pageSize;
-			// zero fill
-			for(int i=0;i<pageSize;++i){
-				memory[startIndex + i] = 0;
+			if(!swapFile.isExist(pageId)){
+				// zero fill at first page fault
+				for(int i=0;i<pageSize;++i){
+					memory[paddr + i] = 0;
+				}
+				pageTable[vpn].readOnly = false;
+			} else {
+				swapFile.read(pageId, memory, paddr);
 			}
-
-			pageTable[vpn].readOnly = false;
-			pageTable[vpn].valid = true;
 		} else{
-			// the code and data page
-			// 1. if readOnly or the first page fault, then load from COFF file
-			// 2. otherwise, load from swap file
-			int numCoffPages = 0;
-			CoffSection section = null;
-			for (int s = 0; s < coff.getNumSections(); s++) {
-				section = coff.getSection(s);
-				numCoffPages += section.getLength();
-				if(numCoffPages > vpn)
-					break;
+			// code and data segment page
+			if(!swapFile.isExist(pageId)){
+				// load from COFF file
+				int numCoffPages = 0;
+				CoffSection section = null;
+				for (int s = 0; s < coff.getNumSections(); s++) {
+					section = coff.getSection(s);
+					numCoffPages += section.getLength();
+					if(numCoffPages > vpn)
+						break;
+				}
+				section.loadPage(vpn-section.getFirstVPN(), ppn);
+				pageTable[vpn].readOnly = section.isReadOnly();
+			} else{
+				swapFile.read(pageId, memory, paddr);
 			}
-
-			section.loadPage(vpn-section.getFirstVPN(), pageTable[vpn].ppn);
-
-			pageTable[vpn].readOnly = section.isReadOnly();
-			pageTable[vpn].valid = true;
 		}
+		mutex.release();
+
+		if(pin)
+			replacer.add(pageId);
 	}
 
 	/**
 	 * Handle a user exception. Called by <tt>UserKernel.exceptionHandler()</tt>
 	 * . The <i>cause</i> argument identifies which exception occurred; see the
 	 * <tt>Processor.exceptionZZZ</tt> constants.
-	 * 
+	 *
 	 * @param cause the user exception that occurred.
 	 */
 	public void handleException(int cause) {
 		Processor processor = Machine.processor();
 
 		switch (cause) {
-		case Processor.exceptionPageFault:
-			int vaddr = Machine.processor().readRegister(Processor.regBadVAddr);
-			int vpn = vaddr / pageSize;
-			if(vpn >= numPages)
+			case Processor.exceptionPageFault:
+				int vaddr = Machine.processor().readRegister(Processor.regBadVAddr);
+				int vpn = vaddr / pageSize;
+				if(vpn >= numPages)
+					super.handleException(cause);
+				else
+					handlePageFault(vpn, false);
+				break;
+			default:
 				super.handleException(cause);
-			else
-				handlePageFault(vpn);
-			break;
-		default:
-			super.handleException(cause);
-			break;
+				break;
 		}
+	}
+
+	private void pin(int vpn){
+		mutex.acquire();
+		if(pageTable[vpn].valid == false){
+			mutex.release();
+			handlePageFault(vpn, true);
+		} else{
+			replacer.remove(new PageId(this, pageTable[vpn]));
+			mutex.release();
+		}
+	}
+
+	private void unpin(int vpn){
+		replacer.add(new PageId(this, pageTable[vpn]));
 	}
 
 	public int readVirtualMemory(int vaddr, byte[] data, int offset, int length) {
@@ -143,9 +191,7 @@ public class VMProcess extends UserProcess {
 		}
 		int addrOffset = vaddr & offsetMask;
 		while(offset < data.length && vpn < pageTable.length && length > 0){
-			if(pageTable[vpn].valid == false){
-				handlePageFault(vpn);
-			}
+			pin(vpn);
 			int nextVirtualAddress = (vpn + 1) * pageSize;
 			int ppn = pageTable[vpn].ppn;
 			int amount = Math.min(length, nextVirtualAddress - vaddr);
@@ -153,8 +199,9 @@ public class VMProcess extends UserProcess {
 			if (paddr < 0 || paddr >= memory.length)
 				return 0;
 			System.arraycopy(memory, paddr, data, offset, amount);
-			
+
 			pageTable[vpn].used = true;
+			unpin(vpn);
 
 			vpn++;
 			vaddr = vpn * pageSize;
@@ -183,9 +230,7 @@ public class VMProcess extends UserProcess {
 		}
 		int addrOffset = vaddr & offsetMask;
 		while(offset < data.length && vpn < pageTable.length && length > 0){
-			if(pageTable[vpn].valid == false){
-				handlePageFault(vpn);
-			}
+			pin(vpn);
 			int nextVirtualAddress = (vpn + 1) * pageSize;
 			int ppn = pageTable[vpn].ppn;
 			int amount = Math.min(length, nextVirtualAddress - vaddr);
@@ -193,9 +238,9 @@ public class VMProcess extends UserProcess {
 			if (paddr < 0 || paddr >= memory.length)
 				return 0;
 			System.arraycopy(data, offset, memory, paddr, amount);
-
 			pageTable[vpn].used = true;
 			pageTable[vpn].dirty = true;
+			unpin(vpn);
 
 			vpn++;
 			vaddr = vpn * pageSize;
@@ -212,4 +257,82 @@ public class VMProcess extends UserProcess {
 	private static final char dbgProcess = 'a';
 
 	private static final char dbgVM = 'v';
+
+	private static class PageId{
+		PageId(VMProcess p, TranslationEntry e){
+			process = p;
+			pte = e;
+		}
+
+		public VMProcess process;
+		public TranslationEntry pte;
+	}
+
+	private static class Replacer {
+		// the Replacer would be used in many processes, so we need to protect it by lock
+
+		Replacer(){
+			mutex = new Lock();
+		}
+
+		// add one page to replacer. e.g. When a page is loaded to main memory or call unpin(), it should be added to replcaer
+		public void add(PageId id){
+
+		}
+
+		// remove one page from replacer. e.g. When function pin() called, the page should be removed from replacer, as it would not be evicted later
+		public void remove(PageId id){
+
+		}
+
+		// evict one page, return the pageid
+		public PageId evict(){
+			return null;
+		}
+
+		private Lock mutex;
+
+	}
+
+	private static class SwapFileManager{
+		// protected by lock.
+		// Notice: when writing to swapfile, there is no need to use lock because OS would support thread-safe write to file. Lock is used to protect the data structures in this class
+
+		SwapFileManager(){
+			swapFile = ThreadedKernel.fileSystem.open("swapFile.sys", true);
+			mutex = new Lock();
+		}
+
+		// write one page to swap file. Write should always success, otherwise the kernel should halt
+		public void write(PageId id){
+			// There are 2 situations
+			// 1. the page is first written to swapfile, we need to find a new place to write this page
+			// 2. the page is written before, then we need to write the page to its original position
+
+		}
+
+		// return whether the page is existed in swapFile
+		public boolean isExist(PageId id) {
+			return false;
+		}
+
+		// read the page to buffer[offset] and return true. If the page is not existed, return false
+		public boolean read(PageId id, byte[] buffer, int offset){
+			return false;
+		}
+
+		public void clear(PageId id){
+
+		}
+
+
+		// physical swapfile
+		private OpenFile swapFile;
+
+		private Lock mutex;
+	}
+
+	private static Replacer replacer;
+
+	private static SwapFileManager swapFile;
 }

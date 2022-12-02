@@ -960,7 +960,7 @@ public class UserProcess {
 
 	private static Lock processCounterLock = new Lock();
 
-	private Lock mutex;
+	protected Lock mutex;
 
 	private static class PipeFile extends OpenFile {
 		PipeFile(String pipeName) {
