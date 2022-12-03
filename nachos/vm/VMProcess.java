@@ -317,16 +317,6 @@ public class VMProcess extends UserProcess {
 			process = p;
 			pte = e;
 		}
-		
-		@Override
-		public int hashCode() {
-			return process.pid*256 + pte.vpn;
-		}
-
-		@Override
-		public boolean equals(Object obj) {
-			return this.process==((PageId)obj).process && this.pte==((PageId)obj).pte;
-		}
 
 		@Override
 		public int hashCode() {
