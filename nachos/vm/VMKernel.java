@@ -14,6 +14,7 @@ public class VMKernel extends UserKernel {
 	 */
 	public VMKernel() {
 		super();
+		invertedPageTable = new VMProcess.PageId[Machine.processor().getNumPhysPages()];
 	}
 
 	/**
@@ -48,4 +49,19 @@ public class VMKernel extends UserKernel {
 	private static VMProcess dummy1 = null;
 
 	private static final char dbgVM = 'v';
+
+	public static VMProcess.PageId invertedPageTable[];
+
+	public static void printInvertedPageTable(){
+		System.out.print("PMem: [");
+		for(int i=0;i<invertedPageTable.length;++i){
+			if(invertedPageTable[i] == null){
+				System.out.print("null, ");
+			} else{
+				System.out.print(invertedPageTable[i]+", ");
+			}
+		}
+		System.out.println("]");
+		System.out.println();
+	}
 }
