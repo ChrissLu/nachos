@@ -22,6 +22,7 @@ public class VMKernel extends UserKernel {
 	 */
 	public void initialize(String[] args) {
 		super.initialize(args);
+		swapFile = ThreadedKernel.fileSystem.open("swapFile.sys", true);
 	}
 
 	/**
@@ -42,6 +43,7 @@ public class VMKernel extends UserKernel {
 	 * Terminate this kernel. Never returns.
 	 */
 	public void terminate() {
+		swapFile.close();
 		super.terminate();
 	}
 
@@ -64,4 +66,6 @@ public class VMKernel extends UserKernel {
 		System.out.println("]");
 		System.out.println();
 	}
+
+	public static OpenFile swapFile;
 }

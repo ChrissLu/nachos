@@ -101,7 +101,7 @@ public class VMProcess extends UserProcess {
 		}
 
 		PageId pageId = new PageId(this, pageTable[vpn]);
-		//System.out.println("Page fault: " + pageId);
+		System.out.println("Page fault: " + pageId);
 		byte[] memory = Machine.processor().getMemory();
 
 		int ppn = replacer.evict();
@@ -442,7 +442,7 @@ public class VMProcess extends UserProcess {
 		// Notice: when writing to swapfile, there is no need to use lock because OS would support thread-safe write to file. Lock is used to protect the data structures in this class
 
 		SwapFileManager(){
-			swapFile = ThreadedKernel.fileSystem.open("swapFile.sys", true);
+			swapFile = VMKernel.swapFile;
 			mutex = new Lock();
 			locationTable = new HashMap<>();
 			lastPageLocation = -1;
