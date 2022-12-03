@@ -14,7 +14,9 @@ main (int argc, char *argv[])
     
     int len = strlen(str);
     
-    int nw = write(p1, str, len);
+    for(int i=0;i<1000;++i){
+        write(p1, str, len);
+    }
 
     return 0;
 }

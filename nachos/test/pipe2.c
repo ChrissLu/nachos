@@ -11,7 +11,7 @@ main (int argc, char *argv[])
     int p2 = creat(pipe2);
 
     char* str1 = "Hello";
-    char* str2 = "World!";
+    char* str2 = "World";
 
     char* argv1[2];
     argv1[0] = pipe1;
@@ -22,10 +22,22 @@ main (int argc, char *argv[])
     argv2[1] = str2;
 
     int producer1 = exec("producer.coff", 2, argv1);
+    if(producer1 < 0){
+        printf("producer1 = %d\n", producer1);
+    }
     int consumer1 = exec("consumer1.coff", 2, argv1);
+    if(consumer1 < 0){
+        printf("consumer1 = %d\n", consumer1);
+    }
 
     int producer2 = exec("producer.coff", 2, argv2);
+    if(producer2 < 0){
+        printf("producer2 = %d\n", producer2);
+    }
     int consumer2 = exec("consumer1.coff", 2, argv2);
+    if(consumer2 < 0){
+        printf("consumer2 = %d\n", consumer2);
+    }
 
     join(producer1, 0);
     join(consumer1, 0);

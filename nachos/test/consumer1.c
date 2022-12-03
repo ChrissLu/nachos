@@ -13,11 +13,14 @@ main (int argc, char *argv[]){
 
     char *str = argv[1];
 
-    char buf[256];
+    char buf[6];
 
-    int nr = read(p1, buf, 256);
-
-    printf("%d\n", strcmp(str, buf));
+    for(int i=0;i<1000;++i){
+        read(p1, buf, 5);
+        if(strcmp(str, buf) != 0)
+            printf("Error!\n");
+    }
+    printf("...passed\n");
 
     //printf("%s\n", buf);
 

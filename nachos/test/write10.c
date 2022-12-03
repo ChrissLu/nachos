@@ -21,7 +21,6 @@ int bigbufnum = 1024;
 int
 do_creat (char *fname) {
     int fd;
-
     printf ("creating %s...\n", fname);
     fd = creat (fname);
     if (fd >= 0) {
@@ -141,14 +140,14 @@ do_validate (char *fname, char *buffer, char *truth, int len)
 }
 
 int
-main ()
+main (int argc, char** argv)
 {
     char buffer[128], *file, *ptr;
     int buflen = 128;
     int fd, r, len, i;
 
     /* write a small amount of data in a few different ways */
-    file = "write.out";
+    file = argv[0];
     char *str = "roses are red\nviolets are blue\nI love Nachos\nand so do you\n";
     len = strlen (str);
 
@@ -167,7 +166,7 @@ main ()
     /* ok, now write lots of binary data.  if you want to manually
      * confirm what was written, running "od -i ../test/binary.out"
      * will print the file and interpret the data as integers. */
-    file = "binary.out";
+    file = argv[0];
     len = sizeof (bigbuf1);  /* len in units of bytes, bigbufnum in ints */
     for (i = 0; i < bigbufnum; i++) {
 	    bigbuf1[i] = i;
